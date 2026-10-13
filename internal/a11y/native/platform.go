@@ -204,13 +204,14 @@ func NewNALSource(ctx context.Context) (*NALSource, error) {
 }
 
 func (s *NALSource) Codec() a11y.VideoCodec { return s.codec }
+
 // CodecString is the WebCodecs codec string the daemon reported in its hello
 // (e.g. "avc1.42E01F"), or "" when unknown.
 func (s *NALSource) CodecString() string { return s.conn.Codec }
-func (s *NALSource) FPS() int               { return s.fps }
-func (s *NALSource) Width() int             { return s.width }
-func (s *NALSource) Height() int            { return s.height }
-func (s *NALSource) Close() error           { return nil }
+func (s *NALSource) FPS() int            { return s.fps }
+func (s *NALSource) Width() int          { return s.width }
+func (s *NALSource) Height() int         { return s.height }
+func (s *NALSource) Close() error        { return nil }
 
 func (s *NALSource) NALs(ctx context.Context) (<-chan []byte, error) {
 	return s.conn.Video(), nil

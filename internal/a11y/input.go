@@ -80,7 +80,7 @@ type Key struct {
 	Name string
 }
 
-func CharKey(c rune) Key { return Key{Char: c} }
+func CharKey(c rune) Key    { return Key{Char: c} }
 func NamedKey(n string) Key { return Key{Name: n} }
 
 // InputProvider synthesizes OS-level pointer/keyboard events. This is separate
@@ -104,9 +104,9 @@ type InputSim struct {
 }
 
 func NewInputSim(b InputProvider) *InputSim { return &InputSim{backend: b} }
-func (s *InputSim) Backend() InputProvider { return s.backend }
-func (s *InputSim) Mouse() *Mouse         { return &Mouse{sim: s} }
-func (s *InputSim) Keyboard() *Keyboard   { return &Keyboard{sim: s} }
+func (s *InputSim) Backend() InputProvider  { return s.backend }
+func (s *InputSim) Mouse() *Mouse           { return &Mouse{sim: s} }
+func (s *InputSim) Keyboard() *Keyboard     { return &Keyboard{sim: s} }
 
 // Mouse provides pointer operations.
 type Mouse struct{ sim *InputSim }
@@ -153,11 +153,11 @@ func (m *Mouse) Scroll(at Point, delta ScrollDelta) error {
 // Keyboard provides key operations.
 type Keyboard struct{ sim *InputSim }
 
-func (k *Keyboard) Press(key Key) error { return k.press(key, nil) }
+func (k *Keyboard) Press(key Key) error             { return k.press(key, nil) }
 func (k *Keyboard) Chord(key Key, held []Key) error { return k.press(key, held) }
-func (k *Keyboard) Down(key Key) error { return k.sim.backend.KeyDown(key) }
-func (k *Keyboard) Up(key Key) error   { return k.sim.backend.KeyUp(key) }
-func (k *Keyboard) TypeText(text string) error { return k.sim.backend.TypeText(text) }
+func (k *Keyboard) Down(key Key) error              { return k.sim.backend.KeyDown(key) }
+func (k *Keyboard) Up(key Key) error                { return k.sim.backend.KeyUp(key) }
+func (k *Keyboard) TypeText(text string) error      { return k.sim.backend.TypeText(text) }
 
 func (k *Keyboard) press(key Key, held []Key) error {
 	for _, h := range held {

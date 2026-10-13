@@ -94,7 +94,7 @@ func (s *WorkerService) ensureToolchains(ctx context.Context) error {
 	if s.toolchains == nil {
 		return nil
 	}
-	specs, err := toolchains.SpecsFromEnv(os.Getenv("WORKSPACE_TOOLCHAINS"), s.shell.Workspace)
+	specs, err := toolchains.SpecsFromEnv(os.Getenv("WORKSPACE_TOOLCHAINS"), s.shell.Workspace())
 	if err != nil {
 		return err
 	}

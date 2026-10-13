@@ -83,7 +83,6 @@ func main() {
 	}
 	env := jobEnv()
 
-
 	runner := shellh.New(ws, env)
 	store, err := jobsvc.OpenStore(db)
 	if err != nil {

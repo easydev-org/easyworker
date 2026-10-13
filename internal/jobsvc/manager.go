@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -120,7 +121,15 @@ func (m *Manager) ExecuteNS(ctx context.Context, ns, command, workdir string, en
 		ns = NamespaceUser
 	}
 	id := newID()
-	r, w := io.Pipe()
+	// An os.Pipe, not an io.Pipe: os/exec passes an *os.File straight to the
+	// child (no copying goroutine), whereas a non-*os.File stdin makes exec
+	// spawn an io.Copy goroutine that never returns until the reader hits EOF —
+	// which would deadlock every command, because the write end is only closed
+	// when the job finishes.
+	r, w, perr := os.Pipe()
+	if perr != nil {
+		return "", perr
+	}
 
 	jobCtx, cancel := context.WithCancel(context.Background())
 	if timeoutMs > 0 {

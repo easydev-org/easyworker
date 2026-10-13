@@ -64,15 +64,16 @@ func makeMoov(width, height, fps int, sizes, offsets []uint32) []byte {
 
 func makeMvhd(duration uint32) []byte {
 	var b bytes.Buffer
-	u32(&b, 0)             // version+flags
-	u32(&b, 0)             // creation_time
-	u32(&b, 0)             // modification_time
-	u32(&b, 1000)          // timescale
-	u32(&b, duration)      // duration
-	u32(&b, 0x00010000)    // rate 1.0
-	u16(&b, 0x0100)        // volume 1.0
-	u16(&b, 0)             // reserved
-	u32(&b, 0); u32(&b, 0) // reserved[2]
+	u32(&b, 0)          // version+flags
+	u32(&b, 0)          // creation_time
+	u32(&b, 0)          // modification_time
+	u32(&b, 1000)       // timescale
+	u32(&b, duration)   // duration
+	u32(&b, 0x00010000) // rate 1.0
+	u16(&b, 0x0100)     // volume 1.0
+	u16(&b, 0)          // reserved
+	u32(&b, 0)
+	u32(&b, 0) // reserved[2]
 	// matrix (unity)
 	for _, v := range []uint32{0x00010000, 0, 0, 0, 0x00010000, 0, 0, 0, 0x40000000} {
 		u32(&b, v)
@@ -107,11 +108,12 @@ func makeTkhd(width, height, duration uint32) []byte {
 	u32(&b, 1)          // track_ID
 	u32(&b, 0)          // reserved
 	u32(&b, duration)   // duration (mvhd timescale 1000)
-	u32(&b, 0); u32(&b, 0) // reserved[2]
-	u16(&b, 0)          // layer
-	u16(&b, 0)          // alternate_group
-	u16(&b, 0)          // volume (0 for video)
-	u16(&b, 0)          // reserved
+	u32(&b, 0)
+	u32(&b, 0) // reserved[2]
+	u16(&b, 0) // layer
+	u16(&b, 0) // alternate_group
+	u16(&b, 0) // volume (0 for video)
+	u16(&b, 0) // reserved
 	for _, v := range []uint32{0x00010000, 0, 0, 0, 0x00010000, 0, 0, 0, 0x40000000} {
 		u32(&b, v)
 	}
@@ -122,13 +124,13 @@ func makeTkhd(width, height, duration uint32) []byte {
 
 func makeMdhd(timescale, duration uint32) []byte {
 	var b bytes.Buffer
-	u32(&b, 0)          // version+flags
-	u32(&b, 0)          // creation_time
-	u32(&b, 0)          // modification_time
-	u32(&b, timescale)  // timescale (=fps)
-	u32(&b, duration)   // duration (in frames)
-	u16(&b, 0x55c4)     // language (und)
-	u16(&b, 0)          // pre_defined
+	u32(&b, 0)         // version+flags
+	u32(&b, 0)         // creation_time
+	u32(&b, 0)         // modification_time
+	u32(&b, timescale) // timescale (=fps)
+	u32(&b, duration)  // duration (in frames)
+	u16(&b, 0x55c4)    // language (und)
+	u16(&b, 0)         // pre_defined
 	return makeBox("mdhd", b.Bytes())
 }
 
@@ -137,7 +139,9 @@ func makeHdlr() []byte {
 	u32(&b, 0) // version+flags
 	u32(&b, 0) // pre_defined
 	b.WriteString("vide")
-	u32(&b, 0); u32(&b, 0); u32(&b, 0) // reserved[3]
+	u32(&b, 0)
+	u32(&b, 0)
+	u32(&b, 0) // reserved[3]
 	b.WriteString("VideoHandler\x00")
 	return makeBox("hdlr", b.Bytes())
 }
@@ -147,14 +151,16 @@ func makeMinf(width, height int, sizes, offsets []uint32) []byte {
 		var b bytes.Buffer
 		u32(&b, 0x00000001) // version=0 flags=1
 		u16(&b, 0)          // graphicsmode
-		u16(&b, 0); u16(&b, 0); u16(&b, 0) // opcolor[3]
+		u16(&b, 0)
+		u16(&b, 0)
+		u16(&b, 0) // opcolor[3]
 		return b.Bytes()
 	}())
 	dinf := makeBox("dinf", func() []byte {
 		// dref: version+flags, entry_count=1, then a self-contained 'url '
 		var dref bytes.Buffer
-		u32(&dref, 0) // version+flags
-		u32(&dref, 1) // entry_count
+		u32(&dref, 0)                                               // version+flags
+		u32(&dref, 1)                                               // entry_count
 		dref.Write(makeBox("url ", []byte{0x00, 0x00, 0x00, 0x01})) // flags=1 self-contained
 		return makeBox("dref", dref.Bytes())
 	}())
@@ -228,8 +234,11 @@ func makeMJPASampleEntry(width, height int) []byte {
 		b.WriteByte(0) // reserved
 	}
 	u16(&b, 1) // data_reference_index
-	u16(&b, 0); u16(&b, 0) // pre_defined, reserved
-	u32(&b, 0); u32(&b, 0); u32(&b, 0) // pre_defined[3]
+	u16(&b, 0)
+	u16(&b, 0) // pre_defined, reserved
+	u32(&b, 0)
+	u32(&b, 0)
+	u32(&b, 0) // pre_defined[3]
 	u16(&b, uint16(width))
 	u16(&b, uint16(height))
 	u32(&b, 0x00480000) // horizresolution 72dpi

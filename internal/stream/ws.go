@@ -19,8 +19,8 @@ import (
 	"context"
 	"encoding/json"
 	"log"
-	"time"
 	"net/http"
+	"time"
 
 	a11y "github.com/easydev-org/easyworker/internal/a11y"
 	"github.com/easydev-org/easyworker/internal/a11y/native"

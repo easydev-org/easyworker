@@ -27,9 +27,9 @@ type FrameEncoder interface {
 
 // RecordOptions configures a recording.
 type RecordOptions struct {
-	FPS      int    // target frames per second (default 10)
+	FPS      int           // target frames per second (default 10)
 	Duration time.Duration // 0 = until ctx cancelled
-	Region   *Rect // nil = full screen
+	Region   *Rect         // nil = full screen
 	Encoder  FrameEncoder
 }
 

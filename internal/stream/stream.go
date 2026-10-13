@@ -16,8 +16,8 @@ const Prefix = "/est/"
 
 // Server streams the screen over one WebSocket (single viewer).
 type Server struct {
-	fps     int
-	bitrate int
+	fps      int
+	bitrate  int
 	mu       sync.Mutex
 	activeWS int
 	wsFrames uint64

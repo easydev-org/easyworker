@@ -35,7 +35,7 @@ func AppByPID(p Provider, pid uint32, timeout time.Duration) (*App, error) {
 		}
 		if time.Now().After(deadline) {
 			return nil, SelectorNotMatched("pid=" + itoa(int(pid))).Diagnose(&Diagnosis{
-				Condition: "application with pid",
+				Condition:    "application with pid",
 				LastObserved: "not found",
 			})
 		}
@@ -68,8 +68,8 @@ func lookupApp(p Provider, timeout time.Duration, match func(*ElementData) bool)
 	}
 }
 
-func (a *App) Element() *Element { return a.element }
-func (a *App) Name() string      { return a.element.data.Name }
+func (a *App) Element() *Element   { return a.element }
+func (a *App) Name() string        { return a.element.data.Name }
 func (a *App) PID() (uint32, bool) { return a.element.PID() }
 
 func (a *App) Windows() ([]*Element, error) {

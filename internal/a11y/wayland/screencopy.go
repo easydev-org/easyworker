@@ -9,13 +9,13 @@ import (
 )
 
 const (
-	scCaptureOutput = 0
-	scFrameCopy     = 0
-	scFrameDestroy  = 1
-	scFrameBufferEvent = 0
-	scFrameFlags       = 1
-	scFrameReady       = 2
-	scFrameFailed      = 3
+	scCaptureOutput     = 0
+	scFrameCopy         = 0
+	scFrameDestroy      = 1
+	scFrameBufferEvent  = 0
+	scFrameFlags        = 1
+	scFrameReady        = 2
+	scFrameFailed       = 3
 	shmCreatePool       = 0
 	shmPoolCreateBuffer = 0
 	wlBufferDestroy     = 0
@@ -84,9 +84,9 @@ func (s *Screencopy) Name() string { return "wayland-screencopy" }
 func (s *Screencopy) Capture() (*ScreencopyFrame, error) {
 	frame := s.c.allocID("zwlr_screencopy_frame_v1")
 	var e encoder
-	e.i32(0)         // overlay_cursor (int)
-	e.u32(s.output)  // output (object)
-	e.u32(frame)     // frame (new_id)
+	e.i32(0)        // overlay_cursor (int)
+	e.u32(s.output) // output (object)
+	e.u32(frame)    // frame (new_id)
 	if err := s.c.send(s.manager, scCaptureOutput, &e); err != nil {
 		return nil, err
 	}

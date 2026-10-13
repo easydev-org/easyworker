@@ -33,7 +33,6 @@ func probeCapabilities() *workerv1.Capabilities {
 		}
 	}
 
-
 	// xa11y: the accessibility CLI on PATH (X11 native-app automation).
 	if _, err := exec.LookPath("xa11y"); err == nil {
 		c.Xa11Y = true

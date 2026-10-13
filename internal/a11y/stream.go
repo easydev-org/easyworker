@@ -42,10 +42,10 @@ type FrameSource interface {
 
 // StreamStats reports live streaming statistics.
 type StreamStats struct {
-	FramesSent   uint64
+	FramesSent    uint64
 	FramesDropped uint64
-	Bitrate      int
-	StartedAt    time.Time
+	Bitrate       int
+	StartedAt     time.Time
 }
 
 // NALSource produces already-encoded H.264 access units (Annex-B) directly,

@@ -130,32 +130,32 @@ func (e *Element) Dump(maxDepth *int) (string, error) {
 }
 
 // Actions (a11y actions)
-func (e *Element) Press() error           { return e.provider.Press(&e.data) }
-func (e *Element) Focus() error           { return e.provider.Focus(&e.data) }
-func (e *Element) Blur() error            { return e.provider.Blur(&e.data) }
-func (e *Element) Toggle() error          { return e.provider.Toggle(&e.data) }
-func (e *Element) Select() error          { return e.provider.Select(&e.data) }
-func (e *Element) Expand() error          { return e.provider.Expand(&e.data) }
-func (e *Element) Collapse() error        { return e.provider.Collapse(&e.data) }
-func (e *Element) ShowMenu() error        { return e.provider.ShowMenu(&e.data) }
-func (e *Element) Increment() error       { return e.provider.Increment(&e.data) }
-func (e *Element) Decrement() error       { return e.provider.Decrement(&e.data) }
-func (e *Element) ScrollIntoView() error  { return e.provider.ScrollIntoView(&e.data) }
-func (e *Element) SetValue(v string) error { return e.provider.SetValue(&e.data, v) }
+func (e *Element) Press() error                    { return e.provider.Press(&e.data) }
+func (e *Element) Focus() error                    { return e.provider.Focus(&e.data) }
+func (e *Element) Blur() error                     { return e.provider.Blur(&e.data) }
+func (e *Element) Toggle() error                   { return e.provider.Toggle(&e.data) }
+func (e *Element) Select() error                   { return e.provider.Select(&e.data) }
+func (e *Element) Expand() error                   { return e.provider.Expand(&e.data) }
+func (e *Element) Collapse() error                 { return e.provider.Collapse(&e.data) }
+func (e *Element) ShowMenu() error                 { return e.provider.ShowMenu(&e.data) }
+func (e *Element) Increment() error                { return e.provider.Increment(&e.data) }
+func (e *Element) Decrement() error                { return e.provider.Decrement(&e.data) }
+func (e *Element) ScrollIntoView() error           { return e.provider.ScrollIntoView(&e.data) }
+func (e *Element) SetValue(v string) error         { return e.provider.SetValue(&e.data, v) }
 func (e *Element) SetNumericValue(v float64) error { return e.provider.SetNumericValue(&e.data, v) }
 func (e *Element) SetTextSelection(start, end uint32) error {
 	return e.provider.SetTextSelection(&e.data, start, end)
 }
-func (e *Element) TypeText(t string) error { return e.provider.TypeText(&e.data, t) }
+func (e *Element) TypeText(t string) error      { return e.provider.TypeText(&e.data, t) }
 func (e *Element) PerformAction(a string) error { return e.provider.PerformAction(&e.data, a) }
-func (e *Element) Activate() error        { return e.provider.Activate(&e.data) }
-func (e *Element) Minimize() error        { return e.provider.Minimize(&e.data) }
-func (e *Element) Maximize() error        { return e.provider.Maximize(&e.data) }
-func (e *Element) EnterFullscreen() error { return e.provider.EnterFullscreen(&e.data) }
-func (e *Element) Restore() error         { return e.provider.Restore(&e.data) }
-func (e *Element) Close() error           { return e.provider.Close(&e.data) }
-func (e *Element) MoveTo(x, y int32) error { return e.provider.MoveTo(&e.data, x, y) }
-func (e *Element) ResizeTo(w, h uint32) error { return e.provider.ResizeTo(&e.data, w, h) }
+func (e *Element) Activate() error              { return e.provider.Activate(&e.data) }
+func (e *Element) Minimize() error              { return e.provider.Minimize(&e.data) }
+func (e *Element) Maximize() error              { return e.provider.Maximize(&e.data) }
+func (e *Element) EnterFullscreen() error       { return e.provider.EnterFullscreen(&e.data) }
+func (e *Element) Restore() error               { return e.provider.Restore(&e.data) }
+func (e *Element) Close() error                 { return e.provider.Close(&e.data) }
+func (e *Element) MoveTo(x, y int32) error      { return e.provider.MoveTo(&e.data, x, y) }
+func (e *Element) ResizeTo(w, h uint32) error   { return e.provider.ResizeTo(&e.data, w, h) }
 
 func wrap(p Provider, ds []ElementData) []*Element {
 	out := make([]*Element, len(ds))

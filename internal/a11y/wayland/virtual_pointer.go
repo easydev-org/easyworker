@@ -1,12 +1,15 @@
 //go:build linux
+
 package wayland
 
 import "fmt"
 
 // zwlr_virtual_pointer_manager_v1 requests:
-//   create_virtual_pointer(seat, new_id)                = 0  (relative-only)
-//   destroy()                                           = 1
-//   create_virtual_pointer_with_output(seat, output,id) = 2  (absolute)
+//
+//	create_virtual_pointer(seat, new_id)                = 0  (relative-only)
+//	destroy()                                           = 1
+//	create_virtual_pointer_with_output(seat, output,id) = 2  (absolute)
+//
 // The output-bound form is what makes MotionAbsolute land on the screen; the
 // plain form's absolute requests are ignored. Sending 1 by mistake destroys the
 // manager (broken pipe), so the opcodes matter.
@@ -17,15 +20,15 @@ const (
 
 // zwlr_virtual_pointer_v1 requests.
 const (
-	vpMotion          = 0 // time(u32), dx(fixed), dy(fixed)
-	vpMotionAbsolute  = 1 // time, x, y, x_extent, y_extent (all u32)
-	vpButton          = 2 // time, button, state
-	vpAxis            = 3 // time, axis, value(fixed)
-	vpFrame           = 4
-	vpAxisSource      = 5
-	vpAxisStop        = 6
-	vpAxisDiscrete    = 7
-	vpDestroy         = 8
+	vpMotion         = 0 // time(u32), dx(fixed), dy(fixed)
+	vpMotionAbsolute = 1 // time, x, y, x_extent, y_extent (all u32)
+	vpButton         = 2 // time, button, state
+	vpAxis           = 3 // time, axis, value(fixed)
+	vpFrame          = 4
+	vpAxisSource     = 5
+	vpAxisStop       = 6
+	vpAxisDiscrete   = 7
+	vpDestroy        = 8
 )
 
 // ButtonState

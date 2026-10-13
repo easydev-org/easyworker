@@ -159,16 +159,18 @@ func (p *Provider) FocusedApp() (*goa11y.ElementData, error) {
 func (p *Provider) Press(e *goa11y.ElementData) error {
 	return p.tapCenter(e)
 }
-func (p *Provider) Focus(e *goa11y.ElementData) error   { return p.tapCenter(e) }
-func (p *Provider) Blur(e *goa11y.ElementData) error    { return nil }
-func (p *Provider) Toggle(e *goa11y.ElementData) error  { return p.tapCenter(e) }
-func (p *Provider) Select(e *goa11y.ElementData) error  { return p.tapCenter(e) }
-func (p *Provider) Expand(e *goa11y.ElementData) error  { return p.tapCenter(e) }
-func (p *Provider) Collapse(e *goa11y.ElementData) error { return p.tapCenter(e) }
-func (p *Provider) ShowMenu(e *goa11y.ElementData) error { return p.longPress(e) }
+func (p *Provider) Focus(e *goa11y.ElementData) error     { return p.tapCenter(e) }
+func (p *Provider) Blur(e *goa11y.ElementData) error      { return nil }
+func (p *Provider) Toggle(e *goa11y.ElementData) error    { return p.tapCenter(e) }
+func (p *Provider) Select(e *goa11y.ElementData) error    { return p.tapCenter(e) }
+func (p *Provider) Expand(e *goa11y.ElementData) error    { return p.tapCenter(e) }
+func (p *Provider) Collapse(e *goa11y.ElementData) error  { return p.tapCenter(e) }
+func (p *Provider) ShowMenu(e *goa11y.ElementData) error  { return p.longPress(e) }
 func (p *Provider) Increment(e *goa11y.ElementData) error { return goa11y.Unsupported("increment") }
 func (p *Provider) Decrement(e *goa11y.ElementData) error { return goa11y.Unsupported("decrement") }
-func (p *Provider) ScrollIntoView(e *goa11y.ElementData) error { return goa11y.Unsupported("scrollIntoView") }
+func (p *Provider) ScrollIntoView(e *goa11y.ElementData) error {
+	return goa11y.Unsupported("scrollIntoView")
+}
 func (p *Provider) SetNumericValue(e *goa11y.ElementData, v float64) error {
 	return goa11y.Unsupported("setNumericValue")
 }
@@ -178,11 +180,17 @@ func (p *Provider) PerformAction(e *goa11y.ElementData, a string) error {
 func (p *Provider) Activate(e *goa11y.ElementData) error { return p.tapCenter(e) }
 func (p *Provider) Minimize(e *goa11y.ElementData) error { return goa11y.Unsupported("minimize") }
 func (p *Provider) Maximize(e *goa11y.ElementData) error { return goa11y.Unsupported("maximize") }
-func (p *Provider) EnterFullscreen(e *goa11y.ElementData) error { return goa11y.Unsupported("fullscreen") }
-func (p *Provider) Restore(e *goa11y.ElementData) error  { return goa11y.Unsupported("restore") }
-func (p *Provider) Close(e *goa11y.ElementData) error    { return goa11y.Unsupported("close") }
-func (p *Provider) MoveTo(e *goa11y.ElementData, x, y int32) error { return goa11y.Unsupported("moveTo") }
-func (p *Provider) ResizeTo(e *goa11y.ElementData, w, h uint32) error { return goa11y.Unsupported("resizeTo") }
+func (p *Provider) EnterFullscreen(e *goa11y.ElementData) error {
+	return goa11y.Unsupported("fullscreen")
+}
+func (p *Provider) Restore(e *goa11y.ElementData) error { return goa11y.Unsupported("restore") }
+func (p *Provider) Close(e *goa11y.ElementData) error   { return goa11y.Unsupported("close") }
+func (p *Provider) MoveTo(e *goa11y.ElementData, x, y int32) error {
+	return goa11y.Unsupported("moveTo")
+}
+func (p *Provider) ResizeTo(e *goa11y.ElementData, w, h uint32) error {
+	return goa11y.Unsupported("resizeTo")
+}
 
 func (p *Provider) SetValue(e *goa11y.ElementData, value string) error {
 	// Focus the field, then type.

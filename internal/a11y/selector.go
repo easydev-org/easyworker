@@ -37,9 +37,9 @@ type AttrFilter struct {
 
 // SimpleSelector is (role | "*")? attr_filter* pseudo?.
 type SimpleSelector struct {
-	Role    Role // empty = any (universal)
-	Nth     int  // 0 = none; 1-based :nth(n)
-	Attrs   []AttrFilter
+	Role  Role // empty = any (universal)
+	Nth   int  // 0 = none; 1-based :nth(n)
+	Attrs []AttrFilter
 }
 
 // SelectorSegment is one step in a selector chain.

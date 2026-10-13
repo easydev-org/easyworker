@@ -2,7 +2,7 @@
 
 package wayland
 
-func (c *Conn) AllocIDForDebug(iface string) uint32 { return c.allocID(iface) }
+func (c *Conn) AllocIDForDebug(iface string) uint32           { return c.allocID(iface) }
 func (c *Conn) SendForDebug(obj, op uint32, e *encoder) error { return c.send(obj, op, e) }
 
 type DebugEvent struct {

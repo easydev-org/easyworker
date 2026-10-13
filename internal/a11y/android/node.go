@@ -38,17 +38,17 @@ type xmlHierarchy struct {
 
 // node is a parsed accessibility node with a stable handle for lookup.
 type node struct {
-	handle   uint64
-	index    int
-	text     string
-	resID    string
-	class    string
-	pkg      string
-	desc     string
-	bounds   *goa11y.Rect
+	handle                                                                                                uint64
+	index                                                                                                 int
+	text                                                                                                  string
+	resID                                                                                                 string
+	class                                                                                                 string
+	pkg                                                                                                   string
+	desc                                                                                                  string
+	bounds                                                                                                *goa11y.Rect
 	clickable, enabled, focusable, focused, scrollable, selected, checkable, checked, password, longClick bool
-	parent   *node
-	children []*node
+	parent                                                                                                *node
+	children                                                                                              []*node
 }
 
 func parseHierarchy(data []byte) ([]*node, error) {

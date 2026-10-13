@@ -1,4 +1,5 @@
 //go:build linux
+
 // Package wayland implements a minimal, dependency-free Wayland client in pure
 // Go. It speaks the wire protocol directly (unix socket + little-endian binary
 // messages) so no libwayland, cgo, or external tools (wtype/wlrctl) are needed.
@@ -19,13 +20,13 @@ import (
 
 // Conn is a Wayland connection.
 type Conn struct {
-	conn    *net.UnixConn
-	nextID  uint32
-	objects map[uint32]string // id → interface name (for debugging)
-	globals []Global
+	conn       *net.UnixConn
+	nextID     uint32
+	objects    map[uint32]string // id → interface name (for debugging)
+	globals    []Global
 	registryID uint32
-	rbuf    []byte
-	rfds    []int
+	rbuf       []byte
+	rfds       []int
 }
 
 // Global is an advertised wl_registry global.
@@ -76,8 +77,8 @@ type encoder struct {
 	fds []int
 }
 
-func (e *encoder) u32(v uint32) { e.buf = binary.LittleEndian.AppendUint32(e.buf, v) }
-func (e *encoder) i32(v int32)  { e.buf = binary.LittleEndian.AppendUint32(e.buf, uint32(v)) }
+func (e *encoder) u32(v uint32)    { e.buf = binary.LittleEndian.AppendUint32(e.buf, v) }
+func (e *encoder) i32(v int32)     { e.buf = binary.LittleEndian.AppendUint32(e.buf, uint32(v)) }
 func (e *encoder) fixed(v float64) { e.u32(uint32(int32(v * 256))) }
 
 func (e *encoder) str(s string) {
