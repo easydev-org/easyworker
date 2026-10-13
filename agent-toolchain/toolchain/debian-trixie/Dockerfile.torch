@@ -1,0 +1,26 @@
+# Toolchain image: PyTorch (+ the usual training/inference dev stack).
+#
+# Extends toolchain-cuda (CUDA 13.4 toolkit + cuDNN 9 + CPython 3.13) and pip-
+# installs the CUDA build of PyTorch. The CUDA runtime libraries (cublas, cudnn,
+# nccl, ...) arrive automatically as `nvidia-*-cu13` wheels in torch's
+# dependency set; the matching `nvcc` for on-the-fly extensions comes from the
+# CUDA base. No GPU/driver is required at build or dev time — this is a dev
+# image, not a serving image.
+ARG BASE_IMAGE=toolchain-cuda:debian-trixie
+FROM ${BASE_IMAGE}
+
+# torch is pinned to the line vLLM 0.28 requires, so this image and the vllm /
+# vllm-omni images agree on the exact torch/vision/audio triple.
+RUN set -eux; \
+    echo "pip via ${HTTPS_PROXY:-direct}"; \
+    python3 -m pip install --no-cache-dir \
+      torch==2.13.0 torchvision==0.28.0 torchaudio==2.11.0 \
+      numpy scipy pillow \
+      transformers==5.14.1 diffusers==0.40.0 accelerate==1.12.0 safetensors \
+      einops sentencepiece protobuf opencv-python-headless \
+      tensorboard ipython jupyterlab \
+    && python3 -m pip check
+
+RUN python3 -c "import torch, torchvision, transformers; \
+print('torch', torch.__version__, 'cuda_build', torch.version.cuda); \
+print('torchvision', torchvision.__version__, 'transformers', transformers.__version__)"

@@ -1,0 +1,26 @@
+# Toolchain image: ComfyUI.
+#
+# ComfyUI is not distributed as a real PyPI package (the `comfyui` name on PyPI
+# is an unrelated placeholder); it is a git repo that runs from its checkout.
+# This image clones it at a pinned tag onto the torch base and installs the
+# repo's own requirements.txt, so `python main.py` works out of the box.
+ARG BASE_IMAGE=toolchain-torch:debian-trixie
+FROM ${BASE_IMAGE}
+
+ARG COMFYUI_REF=v0.37.2
+
+RUN set -eux; \
+    echo "git via ${HTTPS_PROXY:-direct}"; \
+    git clone --depth 1 --branch "${COMFYUI_REF}" \
+      https://github.com/comfyanonymous/ComfyUI /opt/ComfyUI
+
+RUN set -eux; \
+    echo "pip via ${HTTPS_PROXY:-direct}"; \
+    python3 -m pip install --no-cache-dir -r /opt/ComfyUI/requirements.txt \
+    && python3 -m pip check
+
+# ComfyUI defaults (models/output/input live under the checkout).
+ENV COMFYUI_DIR=/opt/ComfyUI
+WORKDIR /opt/ComfyUI
+RUN python3 -c "import sys; sys.path.insert(0, '/opt/ComfyUI'); \
+import folder_paths; print('ComfyUI import OK:', folder_paths.__file__)"

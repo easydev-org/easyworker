@@ -1,0 +1,15 @@
+# Toolchain image: vLLM.
+#
+# Extends the torch image (identical torch==2.13.0 triple) and adds vLLM. The
+# wheel is cp38-abi3, so it runs on CPython 3.13. Runtime GPU libraries come from
+# torch's `nvidia-*-cu13` wheels; the driver is injected at runtime.
+ARG BASE_IMAGE=toolchain-torch:debian-trixie
+FROM ${BASE_IMAGE}
+
+RUN set -eux; \
+    echo "pip via ${HTTPS_PROXY:-direct}"; \
+    python3 -m pip install --no-cache-dir "vllm==0.28.0" \
+    && python3 -m pip check
+
+RUN python3 -c "import vllm, torch; \
+print('vllm', vllm.__version__, '| torch', torch.__version__, '| cuda', torch.version.cuda)"

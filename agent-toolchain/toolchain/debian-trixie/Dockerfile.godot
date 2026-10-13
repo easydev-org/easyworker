@@ -1,0 +1,30 @@
+# Toolchain image: Godot Engine (headless CLI).
+#
+# The official Linux editor binary doubles as the export/import CLI
+# (`godot --headless --export-release ...`), so the image is just the pinned
+# release unzipped onto PATH plus the small runtime deps headless needs
+# (fontconfig; the base already carries libc/libstdc++).
+#
+# The binary is pre-downloaded (fetch-artifacts.sh) and COPYed; only the
+# fontconfig apt step touches the network, via the base's official sources.
+ARG BASE_IMAGE=toolchain-base:debian-trixie
+FROM ${BASE_IMAGE}
+
+RUN set -eux; \
+    echo "apt via ${HTTP_PROXY:-direct}"; \
+    for i in 1 2 3 4 5 6; do \
+      apt-get -o Acquire::Retries=10 update && \
+      apt-get -o Acquire::Retries=10 install -y --no-install-recommends \
+        fontconfig fonts-dejavu-core \
+      && break || { echo "apt retry $i"; sleep 3; }; \
+    done; \
+    rm -rf /var/lib/apt/lists/*
+
+COPY cache/Godot_v4.7.2-stable_linux.x86_64.zip /tmp/godot.zip
+RUN set -eux; \
+    unzip -q /tmp/godot.zip -d /tmp/godot && rm /tmp/godot.zip; \
+    install -d /opt/godot; \
+    install -m755 /tmp/godot/Godot_v4.7.2-stable_linux.x86_64 /opt/godot/godot; \
+    ln -s /opt/godot/godot /usr/local/bin/godot; \
+    rm -rf /tmp/godot
+RUN godot --headless --version

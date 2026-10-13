@@ -1,0 +1,38 @@
+# Toolchain image: llama.cpp (CUDA backend).
+#
+# Builds llama.cpp from source with CUDA support (the CUDA base provides nvcc),
+# and installs the `llama-cpp-python` bindings against the same build. Source
+# builds give an exact, reproducible pin (upstream ships no Linux CUDA wheels).
+#
+# GGML_CUDA=on compiles the CUDA backend; the fatbin targets the default
+# architecture set, so the image runs on any recent NVIDIA GPU without a rebuild.
+ARG BASE_IMAGE=toolchain-cuda:debian-trixie
+FROM ${BASE_IMAGE}
+
+ARG LLAMA_CPP_REF=b11182
+
+RUN set -eux; \
+    echo "git via ${HTTPS_PROXY:-direct}"; \
+    git clone --depth 1 --branch "${LLAMA_CPP_REF}" https://github.com/ggml-org/llama.cpp /opt/llama.cpp; \
+    cd /opt/llama.cpp; \
+    cmake -B build -DGGML_CUDA=ON -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=OFF; \
+    cmake --build build --config Release -j"$(nproc)"; \
+    cmake --install build --prefix /opt/llama.cpp/install; \
+    rm -rf build/CMakeFiles
+ENV PATH=/opt/llama.cpp/install/bin:$PATH \
+    LD_LIBRARY_PATH=/opt/llama.cpp/install/lib:/usr/local/cuda/lib64
+
+# The Python bindings build against the CUDA backend in the same image.
+#
+# CC/CXX must be forced to gcc/g++: python-build-standalone's sysconfig reports
+# `CC=clang` (how that CPython was compiled), and scikit-build-core copies
+# sysconfig's CC into the CMake env when CC is unset — but this image ships gcc,
+# not clang, so the build would die with "Could not find compiler ... clang".
+RUN set -eux; \
+    echo "pip via ${HTTPS_PROXY:-direct}"; \
+    CC=gcc CXX=g++ CMAKE_ARGS="-DGGML_CUDA=on" FORCE_CMAKE=1 \
+      python3 -m pip install --no-cache-dir llama-cpp-python==0.3.35 \
+    && python3 -m pip check
+
+RUN llama-cli --version 2>&1 | head -2; \
+    python3 -c "import llama_cpp; print('llama-cpp-python', llama_cpp.__version__)"

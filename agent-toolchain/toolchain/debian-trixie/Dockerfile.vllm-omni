@@ -1,0 +1,16 @@
+# Toolchain image: vLLM-Omni (omni-modality serving on top of vLLM).
+#
+# Extends the vllm image: vLLM-Omni registers its model architectures through
+# the `vllm.general_plugins` entry point, so vLLM must be importable at runtime.
+# Built on toolchain-vllm (unchanged torch==2.13.0 triple), pinning the
+# transformers range vLLM-Omni tests against (<5.15).
+ARG BASE_IMAGE=toolchain-vllm:debian-trixie
+FROM ${BASE_IMAGE}
+
+RUN set -eux; \
+    echo "pip via ${HTTPS_PROXY:-direct}"; \
+    python3 -m pip install --no-cache-dir "vllm-omni==0.28.0" \
+    && python3 -m pip check
+
+RUN python3 -c "import vllm_omni, vllm; \
+print('vllm-omni', vllm_omni.__version__, '| vllm', vllm.__version__)"

@@ -1,0 +1,80 @@
+# Toolchain image: CUDA 13.4 development base for the ML images.
+#
+# Ships the NVIDIA CUDA toolkit (nvcc + libraries + headers) from the official
+# debian13 apt repo, cuDNN 9, and CPython 3.13 (python-build-standalone) + uv.
+# The ML images (torch, vllm, vllm-omni, comfyui, llamacpp) extend this so the
+# CUDA stack is installed once, not once per image.
+#
+# The host DRIVER (/dev/nvidia*, libcuda.so) is deliberately NOT here: a sandbox
+# gets it at runtime from the NVIDIA device plugin + `nvidia` RuntimeClass. This
+# image only carries the user-space CUDA stack, so kernels compile and GPU code
+# imports even with no GPU present.
+#
+# Python is pinned to 3.13 (not the distro's 3.14): vLLM-Omni pins
+# `requires-python <3.14`, and the ML ecosystem broadly lags the bleeding edge.
+ARG BASE_IMAGE=toolchain-base:debian-trixie
+FROM ${BASE_IMAGE}
+
+ARG CUDA_MAJOR=13
+ARG CUDA_MINOR=4
+
+# --- CUDA toolkit + cuDNN from NVIDIA's Debian 13 repo ----------------------
+# cuda-compiler = nvcc + ptxas + nvvm; cuda-libraries{,-dev} = cublas/cusolver/
+# cufft/... headers+libs; cuda-nvml-dev = NVML headers; command-line-tools =
+# nvprof-class utilities. The full `cuda-toolkit-13-4` metapackage also drags
+# Nsight + documentation (multi-GB), which a dev image does not need.
+RUN set -eux; \
+    echo "cuda apt via ${HTTPS_PROXY:-direct}"; \
+    apt-get -o Acquire::Retries=10 update; \
+    apt-get -o Acquire::Retries=10 install -y --no-install-recommends \
+      ca-certificates curl gnupg cmake ninja-build; \
+    curl -fsSL --retry 5 \
+      "https://developer.download.nvidia.com/compute/cuda/repos/debian13/x86_64/cuda-keyring_1.1-1_all.deb" \
+      -o /tmp/cuda-keyring.deb; \
+    dpkg -i /tmp/cuda-keyring.deb; rm -f /tmp/cuda-keyring.deb; \
+    apt-get -o Acquire::Retries=10 update; \
+    for i in 1 2 3 4 5 6; do \
+      apt-get -o Acquire::Retries=10 install -y --no-install-recommends \
+        "cuda-compiler-${CUDA_MAJOR}-${CUDA_MINOR}" \
+        "cuda-libraries-${CUDA_MAJOR}-${CUDA_MINOR}" \
+        "cuda-libraries-dev-${CUDA_MAJOR}-${CUDA_MINOR}" \
+        "cuda-nvml-dev-${CUDA_MAJOR}-${CUDA_MINOR}" \
+        "cuda-command-line-tools-${CUDA_MAJOR}-${CUDA_MINOR}" \
+        libcudnn9-dev-cuda-13 \
+      && break || { echo "apt retry $i"; sleep 3; }; \
+    done; \
+    ln -sfn "/usr/local/cuda-${CUDA_MAJOR}.${CUDA_MINOR}" /usr/local/cuda; \
+    rm -rf /var/lib/apt/lists/*
+ENV CUDA_HOME=/usr/local/cuda \
+    PATH=/usr/local/cuda/bin:$PATH \
+    LD_LIBRARY_PATH=/usr/local/cuda/lib64 \
+    LIBRARY_PATH=/usr/local/cuda/lib64/stubs
+
+# CUDA ships stub driver libraries (SONAME libcuda.so.1 & friends) so code that
+# links the driver builds and dlopens without a GPU present. Register the stub
+# dir as the LOWEST-priority search path so a real injected driver still wins.
+# The file name MUST sort AFTER the nvidia-container-runtime's `zz-nvcr-*.conf`
+# (hence `zzz-`): with the old `99-` name it sorted BEFORE `zz-nvcr-*`, the stub
+# won at runtime, and `nvidia-smi`/torch failed to talk to the driver. The stub
+# is only the fallback that keeps `import llama_cpp` (and any driver-linked
+# library) working on a driverless box.
+RUN set -eux; \
+    printf '/usr/local/cuda/lib64/stubs\n' > /etc/ld.so.conf.d/zzz-cuda-stubs.conf; \
+    ldconfig
+
+# --- CPython 3.13 + uv ------------------------------------------------------
+# Same python-build-standalone + uv pattern as toolchain-python, just the 3.13
+# line. Installed system-wide (the standalone build is relocatable and not
+# externally-managed, so pip/uv install straight into it).
+COPY cache/cpython-3.13.15+20260924-x86_64-unknown-linux-gnu-install_only.tar.gz /tmp/py313.tar.gz
+COPY cache/uv-x86_64-unknown-linux-gnu.tar.gz /tmp/uv.tar.gz
+RUN set -eux; \
+    tar -xzf /tmp/py313.tar.gz -C /opt && rm /tmp/py313.tar.gz; \
+    mv /opt/python /opt/python-3.13.15; \
+    ln -s /opt/python-3.13.15 /opt/python; \
+    mkdir -p /opt/uv; \
+    tar -xzf /tmp/uv.tar.gz -C /opt/uv --strip-components=1 && rm /tmp/uv.tar.gz
+ENV PATH=/opt/python/bin:/opt/uv:$PATH \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+RUN nvcc --version && python3 --version && uv --version

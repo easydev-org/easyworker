@@ -1,0 +1,15 @@
+# Build context excludes: the worker Dockerfile only needs Go sources + go.mod.
+# The agent-toolchain artifact cache is multi-GB and is used by the
+# agent-toolchain build scripts, NOT by the worker image.
+agent-toolchain/cache/
+images/cache/
+.git/
+dist/
+*.log
+*.test
+
+# webui: the node_modules tree is huge and only needed to (re)build the SPA.
+# internal/webui/dist (the built SPA) IS shipped in the context — it is embedded
+# by go:embed.
+webui/node_modules/
+webui/dist/

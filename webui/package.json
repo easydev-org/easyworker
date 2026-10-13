@@ -1,0 +1,38 @@
+{
+  "name": "agent-worker-webui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "biome check .",
+    "check:fix": "biome check --fix .",
+    "check:svelte": "svelte-check --tsconfig ./tsconfig.json",
+    "check:types": "tsc --noEmit",
+    "format": "biome format --write .",
+    "lint": "biome lint ."
+  },
+  "dependencies": {
+    "@connectrpc/connect": "^2.2.0",
+    "@connectrpc/connect-web": "^2.2.0",
+    "@lucide/svelte": "^1.42.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "bits-ui": "^2.19.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "svelte": "^5.56.10",
+    "tailwind-merge": "^3.6.0",
+    "tailwind-variants": "^3.3.1",
+    "tailwindcss": "^4.3.3"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.9",
+    "@sveltejs/vite-plugin-svelte": "^7.3.0",
+    "@tailwindcss/typography": "^0.5.20",
+    "svelte-check": "^4.3.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.2.2"
+  }
+}

@@ -1,0 +1,173 @@
+# agent-worker Android sandbox — RUN-ONLY: the official Android Emulator, a
+# system image, and adb. Screen is served by the in-guest worker over WebRTC
+# (/stream/), NOT VNC — the emulator runs headless (-no-window). No build toolchain.
+#
+# APKs are built OUTSIDE the sandbox and pushed in over the worker API, then
+# installed with adb:
+#
+#   FileWrite  /workspace/app.apk        (external, x86_64 or pure-Java APK)
+#   Execute    adb -s emulator-5554 install -r app.apk
+#   Execute    adb -s emulator-5554 shell am start -n <pkg>/.MainActivity
+#
+# So this image ships neither the JDK nor Gradle nor build-tools nor
+# cmdline-tools: `gradle assembleDebug` belongs to the build host, not here.
+#
+# Two flavors, one Containerfile (SYSTEM_IMAGE picks the guest):
+#   aosp -> system-images;android-35;default;x86_64        (~746 MB, no GMS)
+#   gms  -> system-images;android-35;google_apis;x86_64    (~1.6 GB, GMS, no Play)
+#
+# The AVD is pre-created at build time (stage 1), so cmdline-tools is not
+# shipped. The guest is NOT persistent: the emulator always boots with
+# -wipe-data, so every container start is a clean device.
+#
+# Screen (view-only):
+#   emulator (-no-window)  ->  worker /stream/ (WebRTC H.264, in-guest screenrecord)
+# There is no input endpoint; drive the device with adb through the worker API.
+#
+# Endpoints: :48080 worker, :6080 screen, :5555 emulator adbd (internal).
+ARG REGISTRY=git.agent.svc.cluster.local/root
+ARG SYSTEM_IMAGE=system-images;android-35;default;x86_64
+ARG ARTIFACT=http://artifact.worker.svc.cluster.local
+
+# ==========================================================================
+# Stage 1: fetch the SDK pieces and pre-create the AVD. Discarded afterwards,
+# so the JDK + cmdline-tools used here never reach the final image.
+# ==========================================================================
+FROM ${REGISTRY}/debian:trixie-slim AS sdk
+
+ARG ARTIFACT=http://artifact.worker.svc.cluster.local
+
+ARG HTTP_PROXY=http://mihomo.develop.svc.cluster.local:7890
+ARG HTTPS_PROXY=http://mihomo.develop.svc.cluster.local:7890
+ENV HTTP_PROXY=${HTTP_PROXY} \
+    HTTPS_PROXY=${HTTPS_PROXY} \
+    NO_PROXY=localhost,127.0.0.1,.svc.cluster.local,.svc,.nip.io,10.199.64.20,artifact.worker.svc.cluster.local \
+    no_proxy=localhost,127.0.0.1,.svc.cluster.local,.svc,.nip.io,10.199.64.20,artifact.worker.svc.cluster.local \
+    DEBIAN_FRONTEND=noninteractive
+ARG CMDLINE_TOOLS=commandlinetools-linux-11076708_latest.zip
+ARG SYSTEM_IMAGE
+
+RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries \
+    && rm -f /etc/apt/sources.list.d/*.sources /etc/apt/sources.list \
+    && printf 'deb [trusted=yes] %s/artifacts/debian/debian trixie main\n' "${ARTIFACT}" > /etc/apt/sources.list.d/artifact.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+         curl unzip openjdk-21-jre-headless \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV ANDROID_SDK_ROOT=/opt/android-sdk \
+    ANDROID_HOME=/opt/android-sdk \
+    ANDROID_AVD_HOME=/opt/android-avd
+
+RUN mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools" \
+    && curl -sSL -o /tmp/cmdtools.zip \
+         "https://dl.google.com/android/repository/${CMDLINE_TOOLS}" \
+    && unzip -q /tmp/cmdtools.zip -d "$ANDROID_SDK_ROOT/cmdline-tools" \
+    && rm -f /tmp/cmdtools.zip \
+    && mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" "$ANDROID_SDK_ROOT/cmdline-tools/latest" \
+    && yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+
+# Only the run-time packages: adb, the emulator, and the guest system image.
+RUN "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+      "platform-tools" "emulator" "${SYSTEM_IMAGE}" \
+    && rm -rf /tmp/* /var/tmp/*
+
+# Pre-create the AVD once, at build time (this is the only thing that needed
+# cmdline-tools at run time before). avdmanager only honors ANDROID_AVD_HOME
+# when the directory already exists, hence the mkdir.
+RUN mkdir -p "$ANDROID_AVD_HOME" \
+    && echo no | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/avdmanager" \
+         create avd -n sandbox -k "${SYSTEM_IMAGE}" -d pixel_6 --force \
+    && sed -i 's/^showDeviceFrame = yes/showDeviceFrame = no/' \
+         "$ANDROID_AVD_HOME/sandbox.avd/config.ini" \
+    # Fixed 1920x1080 landscape "tablet" with a hardware mouse so the streamed
+    # desktop matches the other VMs (Windows/macOS are 1920x1080 too).
+    && { \
+         echo 'hw.lcd.width=1920'; \
+         echo 'hw.lcd.height=1080'; \
+         echo 'hw.lcd.density=240'; \
+         echo 'hw.initialOrientation=landscape'; \
+         echo 'hw.keyboard=yes'; \
+         echo 'hw.dPad=no'; \
+         echo 'hw.mainKeys=no'; \
+         echo 'hw.camera.back=none'; \
+         echo 'hw.camera.front=none'; \
+         echo 'hw.gpu.enabled=yes'; \
+         echo 'hw.gpu.mode=swiftshader_indirect'; \
+         echo 'hw.audioInput=no'; \
+         echo 'hw.audioOutput=no'; \
+         echo 'hw.sdCard=no'; \
+         echo 'hw.trackBall=no'; \
+         echo 'hw.gyroscope=no'; \
+         echo 'hw.sensors.orientation=no'; \
+         echo 'hw.sensors.proximity=no'; \
+         echo 'hw.mouse=yes'; \
+         echo 'disk.dataPartition.size=4G'; \
+         echo 'skin.name=1920x1080'; \
+         echo 'skin.path=_no_skin'; \
+       } >> "$ANDROID_AVD_HOME/sandbox.avd/config.ini"
+
+# ==========================================================================
+# Stage 2: the runtime image.
+# ==========================================================================
+FROM ${REGISTRY}/debian:trixie-slim
+
+ARG ARTIFACT=http://artifact.worker.svc.cluster.local
+
+ARG HTTP_PROXY=http://mihomo.develop.svc.cluster.local:7890
+ARG HTTPS_PROXY=http://mihomo.develop.svc.cluster.local:7890
+ENV HTTP_PROXY=${HTTP_PROXY} \
+    HTTPS_PROXY=${HTTPS_PROXY} \
+    NO_PROXY=localhost,127.0.0.1,.svc.cluster.local,.svc,.nip.io,10.199.64.20,artifact.worker.svc.cluster.local \
+    no_proxy=localhost,127.0.0.1,.svc.cluster.local,.svc,.nip.io,10.199.64.20,artifact.worker.svc.cluster.local \
+    DEBIAN_FRONTEND=noninteractive
+
+# The emulator runs headless (-no-window); the worker streams its screen as
+# H.264 (WebCodecs). lib*: the emulator links libX11/libxcb. No JDK/Gradle.
+RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries \
+    && rm -f /etc/apt/sources.list.d/*.sources /etc/apt/sources.list \
+    && printf 'deb [trusted=yes] %s/artifacts/debian/debian trixie main\n' "${ARTIFACT}" > /etc/apt/sources.list.d/artifact.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+         tini ca-certificates curl unzip xz-utils zip procps socat \
+         libx11-6 libx11-xcb1 libxcb1 libxau6 libxdmcp6 libbsd0 \
+         libpulse0 libasound2t64 libnss3 libnspr4 \
+         libgl1 libglx-mesa0 libegl1 libgles2 \
+         libgtk-3-0t64 libxcb-render0 libxcb-shape0 libxcb-xfixes0 libxcb-randr0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# SDK pieces + the pre-built AVD, copied from stage 1.
+COPY --from=sdk /opt/android-sdk/platform-tools /opt/android-sdk/platform-tools
+COPY --from=sdk /opt/android-sdk/emulator      /opt/android-sdk/emulator
+COPY --from=sdk /opt/android-sdk/system-images /opt/android-sdk/system-images
+COPY --from=sdk /opt/android-avd               /opt/android-avd
+
+ENV ANDROID_SDK_ROOT=/opt/android-sdk \
+    ANDROID_HOME=/opt/android-sdk \
+    ANDROID_AVD_HOME=/opt/android-avd
+# PATH is on the worker's job-env allowlist, so jobs inherit adb/emulator.
+ENV PATH=/opt/android-sdk/platform-tools:/opt/android-sdk/emulator:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# --- the Go worker + the Kotlin native-a11y APK ----------------------------
+# Both run INSIDE the emulator: entrypoint.sh pushes them in and starts them.
+# (The Go worker is a static linux/amd64 binary — no cgo — so it runs under
+# Android's bionic libc; the APK is the est daemon that owns capture/encode/
+# input/a11y.)
+COPY --chmod=755 ./agent-worker      /opt/agent-worker-android
+COPY --chmod=644 ./nativea11y.apk    /opt/nativea11y.apk
+
+COPY --chmod=755 ./entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN mkdir -p /workspace
+
+ENV WORKER_PORT=48080 \
+    WORKER_WORKSPACE=/workspace \
+    WORKER_DB=/tmp/agent-worker/jobs.db \
+    WORKER_OS=android \
+    ANDROID_MEM=8192 \
+    ANDROID_CPUS=4 \
+    ANDROID_AVD=sandbox \
+    ANDROID_GPU=swiftshader_indirect \
+    ANDROID_WIPE_DATA=N
+
+EXPOSE 48080 5555
+ENTRYPOINT ["/usr/bin/tini", "-s", "/usr/local/bin/entrypoint.sh"]

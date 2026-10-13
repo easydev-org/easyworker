@@ -1,0 +1,38 @@
+# build artifacts / binaries
+/dist/
+# xa11y assets are FETCHED from the artifact store at build time (see
+# scripts/fetch-xa11y.sh), never committed.
+/internal/xa11ybin/assets/
+/awtest
+/worker-bin/
+.last-image
+
+# agent-toolchain: multi-GB pre-downloaded build artifacts (rebuilt by
+# agent-toolchain/build-toolchain.sh -> fetch-artifacts.sh); never committed.
+/agent-toolchain/cache/
+
+# agent-toolchain: publish-artifacts.sh staging (built relocatable tarballs).
+/agent-toolchain/.publish/
+
+# go
+go.work.sum
+*.db
+*.test
+
+# os / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# agent-toolchain VM/Android staged guest disks (multi-GB).
+# NOTE: only the staged disk images are ignored. The small UEFI boot-support
+# files ARE committed (main tracks macos/xcode/support/* and
+# windows/devtools/disk-support/*), so do NOT ignore the whole xcode/ or
+# devtools/ directories — that would drop them from every snapshot.
+/agent-toolchain/vm/macos/base/
+/agent-toolchain/vm/windows/base/
+/agent-toolchain/vm/macos/xcode/disk/
+/agent-toolchain/vm/windows/devtools/disk/
+/agent-toolchain/vm/*/repack-*/
+internal/xa11ybin/assets/

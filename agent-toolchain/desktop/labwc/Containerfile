@@ -1,0 +1,94 @@
+# agent-worker desktop sandbox — PURE Wayland flavor (labwc).
+#
+# A self-contained, run-only graphical sandbox: a headless Wayland compositor,
+# the agent-worker binary (which streams the screen). Built FROM
+# agent-toolchain/toolchain-base, so the base build tools are present.
+#
+# Screen stack:
+#   labwc (headless)  (screen streamed by the worker as H.264)
+#
+# Use this flavor for native Wayland clients. Computer-use / accessibility also
+# works here: the image ships the `xa11y` CLI + the AT-SPI2 stack (at-spi2-core,
+# dbus), and the entrypoint brings up a D-Bus session bus + the AT-SPI2
+# bus/registry BEFORE the worker, so a job's app publishes its accessibility
+# tree over D-Bus (no X server needed). Wayland INPUT uses `wtype` (the
+# virtual-keyboard protocol) and screenshots use `grim`. (X11-only tools like
+# xdotool/xclip still cannot target Wayland clients — use the `openbox` flavor
+# for those.)
+#
+# The base image's CMD (`bash`) is replaced by this entrypoint, which starts the
+# whole stack plus agent-worker. The gateway's derive-on-launch path is NOT used
+# for this image (that path forces agent-worker as the sole ENTRYPOINT and would
+# never start the desktop); deploy it as a plain Deployment instead
+# (see abc-protocol/deploy: worker-k8s/agent-worker-desktop.yaml).
+ARG BASE_IMAGE=docker.io/library/debian:trixie-slim
+FROM ${BASE_IMAGE}
+
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ENV HTTP_PROXY=${HTTP_PROXY} \
+    HTTPS_PROXY=${HTTPS_PROXY} \
+    NO_PROXY=localhost,127.0.0.1,.svc.cluster.local,.svc,.nip.io,10.199.64.20 \
+    DEBIAN_FRONTEND=noninteractive
+
+# Wayland compositor + VNC + the browser screen client + GUI runtime libraries
+# a Wayland/GTK/Qt client expects.
+RUN set -eux; \
+    apt-get -o Acquire::Retries=10 update; \
+    for i in 1 2 3 4 5 6; do \
+      apt-get -o Acquire::Retries=10 install -y --no-install-recommends \
+        tini labwc foot \
+        at-spi2-core dbus dbus-x11 libatk-adaptor \
+        xdg-desktop-portal xdg-desktop-portal-wlr xdg-desktop-portal-gtk pipewire pipewire-pulse \
+        wtype grim wlr-randr \
+        fonts-dejavu fonts-noto-cjk \
+        libgbm1 libxkbcommon0 libnss3 libgtk-3-0t64 \
+        libasound2t64 libpulse0 libx11-6 libxcb1 libxrender1 libxtst6 \
+        libxi6 libxcursor1 libxrandr2 libxcomposite1 libxdamage1 \
+        libxfixes3 libxext6 libx264-164 libxcb-xtest0 libyuv0 \
+      && break || { echo "apt retry $i"; sleep 3; }; \
+    done; \
+    rm -rf /var/lib/apt/lists/*
+
+# agent-worker (placed in the build context by build.sh from dist/).
+COPY --chmod=755 ./agent-worker /usr/local/bin/agent-worker
+# native-a11y daemon (abc-agent/worker-native, Zig): a11y/input/capture/H.264 on
+# 127.0.0.1:48079. The worker uses it when WORKER_A11Y=native.
+COPY --chmod=755 ./native-a11y /usr/local/bin/native-a11y
+
+# Minimal labwc config. The rc.xml is XML (an INI-style file makes labwc log a
+# parse error and fall back to defaults), so we set the layout via the wlroots
+# env var instead and provide a menu WITHOUT Reconfigure/Exit (a stray
+# Reconfigure click could otherwise re-read config / drop the compositor).
+RUN mkdir -p /root/.config/labwc && \
+    printf '%s\n' \
+      '<?xml version="1.0"?>' \
+      '<openbox_menu xmlns="http://openbox.org/3.4/menu">' \
+      '  <menu id="root-menu" label="Menu">' \
+      '    <item label="Terminal"><action name="Execute"><command>foot</command></action></item>' \
+      '  </menu>' \
+      '</openbox_menu>' \
+      > /root/.config/labwc/menu.xml && \
+    printf '%s\n' \
+      'QT_QPA_PLATFORM=wayland' \
+      'GDK_BACKEND=wayland' \
+      'LANG=C.UTF-8' \
+      > /root/.config/labwc/environment
+
+
+COPY --chmod=755 ./entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN mkdir -p /root/workspace
+
+ENV WORKER_PORT=48080 \
+    WORKER_DB=/data/jobs.db \
+    WAYLAND_DISPLAY=wayland-0 \
+    XKB_DEFAULT_LAYOUT=us \
+    XDG_RUNTIME_DIR=/tmp/xdg \
+    DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/agent-dbus \
+    NO_AT_BRIDGE=0 \
+    AT_SPI_CLIENT=true \
+    ACCESSIBILITY_ENABLED=1 \
+    SCREEN_GEOMETRY=1920x1080
+
+EXPOSE 48080
+ENTRYPOINT ["/usr/bin/tini", "-s", "/usr/local/bin/entrypoint.sh"]
