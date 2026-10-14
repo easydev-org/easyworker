@@ -1,13 +1,29 @@
 # syntax=docker/dockerfile:1
 # agent-worker: single static Go binary, Connect RPC (worker.v1.WorkerService).
-# Built via the cluster buildkitd (./build-image.sh), pushed to forgejo.
 #
-# The runtime image deliberately ships NO shell: agent-worker brings its own
-# (mvdan.cc/sh interp) — alpine is here only for ca-certificates + curl
-# (in-cluster verification). The same binary is injected into arbitrary
-# sandbox base images, including scratch/distroless.
+# Three stages:
+#   1. webui — build the control-panel SPA from the easyworker-webui repo
+#      (dist is NOT committed in this repo anymore).
+#   2. build — compile the Go binary, embedding the SPA from stage 1.
+#   3. runtime — a minimal alpine (ca-certificates + curl only).
 ARG REGISTRY=git.agent.svc.cluster.local/root
 
+# ---- webui (node) ----
+FROM ${REGISTRY}/node:22-alpine AS webui
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG EASYWORKER_WEBUI_REPO=https://github.com/easydev-org/easyworker-webui.git
+ARG EASYWORKER_WEBUI_REF=main
+ENV HTTP_PROXY=${HTTP_PROXY} \
+    HTTPS_PROXY=${HTTPS_PROXY} \
+    NO_PROXY=localhost,127.0.0.1,.svc.cluster.local,.svc,.fenjin.org,10.199.64.20
+WORKDIR /webui
+RUN apk add --no-cache git ca-certificates \
+    && git clone --depth 1 --branch "${EASYWORKER_WEBUI_REF}" "${EASYWORKER_WEBUI_REPO}" . \
+    && npm ci --no-audit --no-fund \
+    && OUT_DIR=dist npm run build
+
+# ---- build (go) ----
 FROM ${REGISTRY}/golang:1.26-alpine AS build
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
@@ -20,17 +36,14 @@ ENV HTTP_PROXY=${HTTP_PROXY} \
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
-# xa11y assets are FETCHED from the artifact store (not committed). Fetch the
-# target's platform before building, so //go:embed finds it.
-ARG ARTIFACT=http://artifact.worker.svc.cluster.local
-COPY scripts/fetch-xa11y.sh scripts/fetch-xa11y.sh
-RUN ARTIFACT=${ARTIFACT} sh scripts/fetch-xa11y.sh
-# internal/webui/dist (the built SPA, embedded via go:embed) is COMMITTED, so a
-# plain source build needs no Node toolchain. Regenerate it with
-# `npm --prefix webui ci && npm --prefix webui run build`.
 COPY . ./
+# The SPA is built in the webui stage; place it at the go:embed path AFTER
+# copying the tree (the repo's internal/webui/dist/ is just a placeholder), so
+# //go:embed finds the real build.
+COPY --from=webui /webui/dist/ internal/webui/dist/
 RUN go build -trimpath -ldflags "-s -w" -o /out/agent-worker ./cmd/agent-worker
 
+# ---- runtime ----
 FROM ${REGISTRY}/alpine:3.24
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
@@ -40,12 +53,8 @@ ENV HTTP_PROXY=${HTTP_PROXY} \
     https_proxy=${HTTPS_PROXY} \
     NO_PROXY=localhost,127.0.0.1,.svc.cluster.local,.svc,.fenjin.org,10.199.64.20 \
     no_proxy=localhost,127.0.0.1,.svc.cluster.local,.svc,.fenjin.org,10.199.64.20
-# Install ca-certificates/curl directly through the build proxy — the official
-# Alpine CDN is left untouched (no mirror swap). apk honors the LOWERCASE
-# http_proxy/https_proxy variables.
 RUN apk add --no-cache ca-certificates curl
 COPY --from=build /out/agent-worker /usr/local/bin/agent-worker
-# Default workspace is ~/workspace (the binary's own default); create it.
 RUN mkdir -p /root/workspace /data
 ENV WORKER_PORT=8080 \
     WORKER_DB=/data/jobs.db

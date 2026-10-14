@@ -13,6 +13,10 @@ set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 REGISTRY="${REGISTRY:-git.agent.svc.cluster.local}"
+# Base-image registry for the FROM lines (golang/node/alpine). Defaults to
+# <REGISTRY>/root; override with BASE_REGISTRY=docker.io/library for a build
+# that pulls base images from Docker Hub.
+BASE_REGISTRY="${BASE_REGISTRY:-${REGISTRY}/root}"
 NAMESPACE="${NAMESPACE:-abcp}"
 NAME="${NAME:-agent-worker}"
 TAG="${TAG:-$(date +%Y%m%d%H%M%S)}"
@@ -26,13 +30,36 @@ DOCKERFILE="Dockerfile"
 WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
 
+# `--artifacts`: build ONLY the artifacts (binary + webui), no container image.
+# Uses Containerfile.build with --output type=local, which multi-stages the SPA
+# (from easyworker-webui) and the Go binary, then exports both trees.
+if [ "${1:-}" = "--artifacts" ]; then
+  OUT="${OUT:-${DIR}/dist}"
+  rm -rf "${OUT}"; mkdir -p "${OUT}"
+  echo "Building artifacts -> ${OUT} (buildkitd=${BUILDKIT})"
+  buildctl --addr "${BUILDKIT}" build \
+    --frontend dockerfile.v0 \
+    --local "context=${DIR}" \
+    --local "dockerfile=${DIR}" \
+    --opt "filename=Containerfile.build" \
+    --opt "build-arg:REGISTRY=${BASE_REGISTRY}" \
+    --opt "build-arg:HTTP_PROXY=${PROXY}" \
+    --opt "build-arg:HTTPS_PROXY=${PROXY}" \
+    --opt "build-arg:NO_PROXY=localhost,127.0.0.1,.svc.cluster.local,.svc,git.agent.fenjin.org,10.199.64.20" \
+    --output "type=local,dest=${OUT}" \
+    --progress plain
+  echo "Artifacts in ${OUT}:"
+  find "${OUT}" -type f | sort
+  exit 0
+fi
+
 echo "Building ${NAME} image -> ${DEST} (buildkitd=${BUILDKIT})"
 buildctl --addr "${BUILDKIT}" build \
   --frontend dockerfile.v0 \
   --local "context=${DIR}" \
   --local "dockerfile=${DIR}" \
   --opt "filename=${DOCKERFILE}" \
-  --opt "build-arg:REGISTRY=${REGISTRY}/root" \
+  --opt "build-arg:REGISTRY=${BASE_REGISTRY}" \
   --opt "build-arg:HTTP_PROXY=${PROXY}" \
   --opt "build-arg:HTTPS_PROXY=${PROXY}" \
   --opt "build-arg:NO_PROXY=localhost,127.0.0.1,.svc.cluster.local,.svc,git.agent.fenjin.org,10.199.64.20" \

@@ -5,11 +5,9 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-# The `xa11y` accessibility CLI is EMBEDDED in the worker (internal/xa11ybin via
 # //go:embed). Its per-platform assets are fetched from artifact, NOT committed
 # (.gitignore), so a fresh checkout MUST fetch them before compiling — one per
 # GOOS, since build-all cross-compiles linux/windows/darwin.
-sh scripts/fetch-xa11y.sh
 
 # GOOS/GOARCH -> filename suffix (windows gets .exe).
 suffix() { # os arch

@@ -1,8 +1,5 @@
 # build artifacts / binaries
 /dist/
-# xa11y assets are FETCHED from the artifact store at build time (see
-# scripts/fetch-xa11y.sh), never committed.
-/internal/xa11ybin/assets/
 /awtest
 /worker-bin/
 .last-image
@@ -35,4 +32,5 @@ go.work.sum
 /agent-toolchain/vm/macos/xcode/disk/
 /agent-toolchain/vm/windows/devtools/disk/
 /agent-toolchain/vm/*/repack-*/
-internal/xa11ybin/assets/
+agent-worker
+dist/

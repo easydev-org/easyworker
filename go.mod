@@ -5,6 +5,7 @@ go 1.26.0
 require (
 	connectrpc.com/connect/v2 v2.0.0
 	github.com/BurntSushi/xgb v0.0.0-20210121224620-deaf085860bc
+	github.com/easydev-org/easysh v0.0.0-20261013062502-16d3443ab82f
 	github.com/ebitengine/purego v0.11.1
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/pion/webrtc/v4 v4.2.23
@@ -18,7 +19,6 @@ require (
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/easydev-org/easysh v0.0.0-20261013062502-16d3443ab82f // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect

@@ -72,7 +72,6 @@ LANGS="${*:-base java java25 clojure elixir gleam swift clang lua perl r conda g
 echo "==> cross-compiling agent-worker (linux/amd64) from ${ROOT}"
 # Embed the `xa11y` CLI (internal/xa11ybin): fetch the linux asset first (the
 # assets are fetched from artifact, not committed — see .gitignore).
-sh "${ROOT}/scripts/fetch-xa11y.sh" linux
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
   go build -C "${ROOT}" -trimpath -ldflags "-s -w" \
   -o "${HERE}/agent-worker" ./cmd/agent-worker

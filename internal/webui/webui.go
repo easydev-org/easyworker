@@ -1,9 +1,9 @@
 // Package webui embeds the worker's built-in control panel.
 //
-// The panel is a Svelte 5 + Tailwind 4 SPA (built by webui/ via vite into
-// dist/, embedded here) served from the worker's own port at "/", so it is
-// SAME-ORIGIN with the Connect RPC: the browser needs only a bearer token, no
-// CORS.
+// The panel is a Svelte 5 + Tailwind 4 SPA from the easyworker-webui repo
+// (github.com/easydev-org/easyworker-webui), built into dist/ and embedded
+// here, served from the worker's own port at "/", so it is SAME-ORIGIN with the
+// Connect RPC: the browser needs only a bearer token, no CORS.
 //
 // It presents a login gate (bearer token, or one-time-code claim of an
 // unclaimed worker), then a shell-style console (run commands with live
@@ -19,8 +19,9 @@ import (
 	"strings"
 )
 
-// The built SPA. Run `npm --prefix webui run build` (or the Dockerfile's node
-// stage) to (re)generate dist/ before building the Go binary.
+// The built SPA. dist/ is produced by the Containerfile's node stage (which
+// clones easyworker-webui and runs `npm run build`), or locally with
+// `OUT_DIR=… npm run build` in that repo. It is NOT committed.
 //
 //go:embed all:dist
 var dist embed.FS
