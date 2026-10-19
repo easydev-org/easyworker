@@ -27,6 +27,7 @@ import (
 	"connectrpc.com/connect/v2/connecthttp"
 	workerv1connect "github.com/easydev-org/easyworker/gen/worker/v1/workerv1connect"
 	"github.com/easydev-org/easyworker/internal"
+	"github.com/easydev-org/easyworker/internal/a11y/native"
 	"github.com/easydev-org/easyworker/internal/auth"
 	"github.com/easydev-org/easyworker/internal/computer"
 	"github.com/easydev-org/easyworker/internal/filesvc"
@@ -72,6 +73,14 @@ func main() {
 	// environ (see jobEnv), and the token must not travel with them. The auth
 	// gate below keeps the returned value in memory.
 	bootToken := takeBootToken()
+
+	// Hand the same token to the native-a11y client, so the worker can present
+	// it to the easystream daemon (est Auth frame + HTTP ?token=). The sandbox
+	// starts the daemon with EAZYSTREAM_CONTROL_TOKEN set to this value, so the
+	// daemon is LOCKED (control needs the token, view stays open) and the worker
+	// is the only client that can drive it. Empty when no token was supplied
+	// (dev / auth off), in which case the daemon runs open as before.
+	native.SetControlToken(bootToken)
 
 	// Job env: inherit the worker's own environment (the sandbox image is the
 	// source of truth for toolchain variables); the token is already gone.

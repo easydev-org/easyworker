@@ -24,6 +24,13 @@ const (
 	tHello = 0x01
 	tVideo = 0x02
 
+	// Auth: the client presents its token; the daemon replies with the mode it
+	// granted. See EST.md / easystream auth.rs. Without this frame a connection
+	// to a daemon that HAS a control token is read-only (View), so input, a11y
+	// actions and clipboard writes are dropped.
+	tAuth   = 0x03
+	tAuthOK = 0x04
+
 	tMove   = 0x10
 	tButton = 0x11
 	tScroll = 0x12
@@ -100,6 +107,14 @@ func spawnDaemon() error {
 		return err
 	}
 	cmd := exec.Command(bin, "serve")
+	// Give the daemon the control token BEFORE it starts. The worker is the
+	// only thing that connects to it, and this is the same token the worker
+	// will present, so the daemon comes up LOCKED (control requires the token,
+	// view stays open) instead of the default "no token => everyone is control".
+	cmd.Env = os.Environ()
+	if tok := authToken(); tok != "" {
+		cmd.Env = append(cmd.Env, "EAZYSTREAM_CONTROL_TOKEN="+tok)
+	}
 	// Send the daemon's output somewhere we can read it back on the guest.
 	if logPath := os.Getenv("NATIVE_A11Y_LOG"); logPath != "" {
 		if lf, lerr := os.Create(logPath); lerr == nil {
@@ -214,8 +229,51 @@ func Dial(ctx context.Context) (*Conn, error) {
 	c.Width = int(binary.BigEndian.Uint16(body[2:4]))
 	c.Height = int(binary.BigEndian.Uint16(body[4:6]))
 	c.FPS = int(body[6])
+	// Present the control token BEFORE the read loop starts consuming frames.
+	// The daemon sends Hello first and only then reads control frames, so Auth
+	// here is ordered correctly. Without it a daemon that HAS a control token
+	// treats this connection as read-only (View) and silently drops every input
+	// / a11y-action / clipboard-write frame the worker forwards.
+	if tok := authToken(); tok != "" {
+		if err := c.send(tAuth, []byte(tok)); err != nil {
+			nc.Close()
+			return nil, fmt.Errorf("native-a11y: auth: %w", err)
+		}
+	}
 	go c.readLoop()
 	return c, nil
+}
+
+// controlToken is the secret this worker presents to the daemon. main sets it
+// once at startup (see SetControlToken) and then REMOVES it from the process
+// environment, so jobs never inherit it. It is the same value the sandbox gave
+// the daemon as EAZYSTREAM_CONTROL_TOKEN — usually the worker's WORKER_TOKEN.
+var (
+	controlTokenMu sync.RWMutex
+	controlToken   string
+)
+
+// SetControlToken records the token to present to the daemon (empty = the
+// daemon runs open and no Auth frame is sent). main calls it once at startup.
+func SetControlToken(tok string) {
+	controlTokenMu.Lock()
+	controlToken = tok
+	controlTokenMu.Unlock()
+}
+
+// authToken is the token to present on est/HTTP. Prefers the value main set,
+// then falls back to the environment (tests, or a launcher that exported it).
+func authToken() string {
+	controlTokenMu.RLock()
+	t := controlToken
+	controlTokenMu.RUnlock()
+	if t != "" {
+		return t
+	}
+	if t := os.Getenv("EAZYSTREAM_CONTROL_TOKEN"); t != "" {
+		return t
+	}
+	return os.Getenv("WORKER_TOKEN")
 }
 
 func readFrame(r io.Reader) (typ byte, flags byte, body []byte, err error) {

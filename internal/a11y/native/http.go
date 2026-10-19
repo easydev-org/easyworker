@@ -48,6 +48,15 @@ func NewHTTPClient() *HTTPClient {
 // get performs a GET and returns the body (the daemon replies text/plain).
 func (c *HTTPClient) get(ctx context.Context, path string, q url.Values) ([]byte, error) {
 	u := c.base + path
+	// Present the control token so a11y MUTATIONS (action/click/type/key/
+	// scroll/drag, clipboard set) are not rejected with 403. Reads need no
+	// token, so an empty token simply leaves the request anonymous (View).
+	if tok := authToken(); tok != "" {
+		if q == nil {
+			q = url.Values{}
+		}
+		q.Set("token", tok)
+	}
 	if len(q) > 0 {
 		u += "?" + q.Encode()
 	}
