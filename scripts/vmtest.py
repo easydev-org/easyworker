@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deploy agent-worker to a dockur VM over SSH and run the awtest suite on it.
+"""Deploy easyworker to a dockur VM over SSH and run the awtest suite on it.
 
 Usage: vmtest.py <macos|windows>
 Reads dist/ binaries built by scripts/build-all.sh. Prints the remote test
@@ -11,8 +11,8 @@ import time
 import paramiko
 
 VMS = {
-    "macos": dict(host="ssh-macos.temp.svc.cluster.local", worker="agent-worker-darwin-amd64", test="awtest-darwin-amd64"),
-    "windows": dict(host="ssh-windows.temp.svc.cluster.local", worker="agent-worker-windows-amd64.exe", test="awtest-windows-amd64.exe"),
+    "macos": dict(host="ssh-macos.temp.svc.cluster.local", worker="easyworker-darwin-amd64", test="awtest-darwin-amd64"),
+    "windows": dict(host="ssh-windows.temp.svc.cluster.local", worker="easyworker-windows-amd64.exe", test="awtest-windows-amd64.exe"),
 }
 USER, PASS = "docker", "admin"
 
@@ -40,10 +40,10 @@ def main():
     # stop any previous instance FIRST (Windows locks a running exe), then
     # upload fresh binaries, then start detached via Win32_Process Create.
     if which == "windows":
-        run(c, "Stop-Process -Name agent-worker-windows-amd64 -Force -ErrorAction SilentlyContinue", quiet=True)
+        run(c, "Stop-Process -Name easyworker-windows-amd64 -Force -ErrorAction SilentlyContinue", quiet=True)
         run(c, "Remove-Item -Recurse -Force C:\\Users\\docker\\ws -ErrorAction SilentlyContinue", quiet=True)
     else:
-        run(c, "pkill -f agent-worker-darwin || true", quiet=True)
+        run(c, "pkill -f easyworker-darwin || true", quiet=True)
         run(c, "rm -rf /Users/docker/ws && mkdir -p /Users/docker/ws", quiet=True)
 
     sftp = c.open_sftp()
@@ -58,12 +58,12 @@ def main():
 
     if which == "windows":
         run(c, "Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments "
-               "@{CommandLine='C:\\Users\\docker\\agent-worker-windows-amd64.exe "
+               "@{CommandLine='C:\\Users\\docker\\easyworker-windows-amd64.exe "
                "-workspace C:\\Users\\docker\\ws -db C:\\Users\\docker\\ws\\jobs.db'}")
     else:
-        run(c, "chmod +x /Users/docker/agent-worker-darwin-amd64 /Users/docker/awtest-darwin-amd64", quiet=True)
+        run(c, "chmod +x /Users/docker/easyworker-darwin-amd64 /Users/docker/awtest-darwin-amd64", quiet=True)
         run(c, "cd /Users/docker && WORKER_WORKSPACE=/Users/docker/ws WORKER_DB=/Users/docker/ws/jobs.db "
-               "nohup ./agent-worker-darwin-amd64 > /Users/docker/worker.log 2>&1 & sleep 1; echo started")
+               "nohup ./easyworker-darwin-amd64 > /Users/docker/worker.log 2>&1 & sleep 1; echo started")
 
     # wait for healthz
     for _ in range(30):

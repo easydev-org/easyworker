@@ -1,6 +1,6 @@
 version: v2
 plugins:
-  # agent-worker Go (this module): worker/v1/*.proto -> gen/worker/v1
+  # easyworker Go (this module): worker/v1/*.proto -> gen/worker/v1
   - local: protoc-gen-go
     out: ../gen
     opt: paths=source_relative

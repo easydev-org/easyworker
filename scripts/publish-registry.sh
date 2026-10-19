@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Publish the cross-platform agent-worker binaries to the easylab artifact
+# Publish the cross-platform easyworker binaries to the easylab artifact
 # registry (generic raw store) so consumers (easylab image builds, sandbox
 # derived images, host runners) can fetch them over HTTP with no source tree.
 #
-#   <EASYLAB_ARTIFACT_URL>/artifacts/generic/agent-worker/<version>/<filename>
+#   <EASYLAB_ARTIFACT_URL>/artifacts/generic/easyworker/<version>/<filename>
 #
 # Reads dist/ binaries (run scripts/build-all.sh first). Uploads each platform;
 # the linux/amd64 file is what easylab injects into sandbox base images.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-NAME="${WORKER_NAME:-agent-worker}"
+NAME="${WORKER_NAME:-easyworker}"
 VERSION="${WORKER_VERSION:-v0.1.0}"
 BASE="${EASYLAB_ARTIFACT_URL:-http://easylab.temp.svc.cluster.local}"
 TOKEN="${ARTIFACT_TOKEN:-devtoken}"
@@ -32,8 +32,8 @@ echo "Publishing ${NAME}@${VERSION} to ${BASE}/artifacts/generic/"
 for os in linux windows darwin; do
   for arch in amd64 arm64; do
     sfx=""; [ "$os" = "windows" ] && sfx=".exe"
-    upload "${DIR}/dist/agent-worker-${os}-${arch}${sfx}" "agent-worker-${os}-${arch}${sfx}"
+    upload "${DIR}/dist/easyworker-${os}-${arch}${sfx}" "easyworker-${os}-${arch}${sfx}"
   done
 done
 echo "Done. Verify with:"
-echo "  curl -H 'Authorization: Bearer ${TOKEN}' ${BASE%/}/artifacts/generic/${NAME}/${VERSION}/agent-worker-linux-amd64 -o /tmp/agent-worker"
+echo "  curl -H 'Authorization: Bearer ${TOKEN}' ${BASE%/}/artifacts/generic/${NAME}/${VERSION}/easyworker-linux-amd64 -o /tmp/easyworker"

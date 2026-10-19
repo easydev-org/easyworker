@@ -18,7 +18,7 @@ func envOS() string {
 }
 
 // EnvOS returns the SANDBOX OS (the WORKER_OS override, else the host GOOS).
-// Exported for cmd/agent-worker: host-OS-only setup (the embedded xa11y CLI)
+// Exported for cmd/easyworker: host-OS-only setup (the embedded xa11y CLI)
 // is skipped on a device sandbox (android) whose computer-use driver is adb,
 // not xa11y.
 func EnvOS() string { return envOS() }

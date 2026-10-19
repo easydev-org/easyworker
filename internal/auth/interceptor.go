@@ -13,7 +13,7 @@ import (
 //
 // Fail-closed: every WorkerService call is rejected with Unauthenticated unless
 // the request carries an accepted token. The enroll service is mounted on its
-// own server (see cmd/agent-worker) and manages its own gate.
+// own server (see cmd/easyworker) and manages its own gate.
 type interceptor struct {
 	gate *Gate
 }

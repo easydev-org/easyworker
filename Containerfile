@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# agent-worker: single static Go binary, Connect RPC (worker.v1.WorkerService).
+# easyworker: single static Go binary, Connect RPC (worker.v1.WorkerService).
 #
 # Three stages:
 #   1. webui — build the control-panel SPA from the easyworker-webui repo
@@ -41,7 +41,7 @@ COPY . ./
 # copying the tree (the repo's internal/webui/dist/ is just a placeholder), so
 # //go:embed finds the real build.
 COPY --from=webui /webui/dist/ internal/webui/dist/
-RUN go build -trimpath -ldflags "-s -w" -o /out/agent-worker ./cmd/agent-worker
+RUN go build -trimpath -ldflags "-s -w" -o /out/easyworker ./cmd/easyworker
 
 # ---- runtime ----
 FROM ${REGISTRY}/alpine:3.24
@@ -54,9 +54,9 @@ ENV HTTP_PROXY=${HTTP_PROXY} \
     NO_PROXY=localhost,127.0.0.1,.svc.cluster.local,.svc,.fenjin.org,10.199.64.20 \
     no_proxy=localhost,127.0.0.1,.svc.cluster.local,.svc,.fenjin.org,10.199.64.20
 RUN apk add --no-cache ca-certificates curl
-COPY --from=build /out/agent-worker /usr/local/bin/agent-worker
+COPY --from=build /out/easyworker /usr/local/bin/easyworker
 RUN mkdir -p /root/workspace /data
 ENV WORKER_PORT=8080 \
     WORKER_DB=/data/jobs.db
 EXPOSE 8080
-ENTRYPOINT ["/usr/local/bin/agent-worker"]
+ENTRYPOINT ["/usr/local/bin/easyworker"]

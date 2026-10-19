@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Multi-platform awtest run: all three platforms, one report.
 #
-#   linux   -> against the in-cluster agent-worker service (temp ns)
+#   linux   -> against the in-cluster easyworker service (temp ns)
 #   windows -> upload+start inside the dockur-windows VM, run awtest there
 #   macos   -> upload+start inside the dockur-macos VM, run awtest there
 #
@@ -13,7 +13,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 rc=0
 
 echo "========== linux (k8s svc) =========="
-./dist/awtest-linux-amd64 -addr http://agent-worker.temp.svc.cluster.local || rc=1
+./dist/awtest-linux-amd64 -addr http://easyworker.temp.svc.cluster.local || rc=1
 
 echo "========== windows (dockur VM) =========="
 python3 scripts/vmtest.py windows || rc=1

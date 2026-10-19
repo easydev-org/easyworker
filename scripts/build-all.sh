@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Cross-compile agent-worker + awtest for every supported platform/arch into
+# Cross-compile easyworker + awtest for every supported platform/arch into
 # dist/: linux, windows, darwin (macOS) × amd64 + arm64. Pure-Go (CGO disabled)
 # so all targets build from any host.
 set -euo pipefail
@@ -17,8 +17,8 @@ suffix() { # os arch
 build() { # os arch
   local os="$1" arch="$2" sfx
   sfx="$(suffix "$os" "$arch")"
-  echo "-> agent-worker-$os-$arch$sfx + awtest-$os-$arch$sfx + trustprobe-$os-$arch$sfx"
-  CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags "-s -w" -o "dist/agent-worker-$os-$arch$sfx" ./cmd/agent-worker
+  echo "-> easyworker-$os-$arch$sfx + awtest-$os-$arch$sfx + trustprobe-$os-$arch$sfx"
+  CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags "-s -w" -o "dist/easyworker-$os-$arch$sfx" ./cmd/easyworker
   CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags "-s -w" -o "dist/awtest-$os-$arch$sfx" ./cmd/awtest
   CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags "-s -w" -o "dist/trustprobe-$os-$arch$sfx" ./cmd/trustprobe
 }

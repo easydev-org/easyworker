@@ -7,8 +7,8 @@
 //
 //	trustprobe -addr http://<pod-ip>:48080
 //
-// It is used to validate the agent-worker preset images
-// (agent-worker/images): a preset must pass the probes with a pod spec that
+// It is used to validate the easyworker preset images
+// (easyworker/images): a preset must pass the probes with a pod spec that
 // injects nothing beyond the egress sidecar.
 package main
 

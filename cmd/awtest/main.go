@@ -1,4 +1,4 @@
-// Command awtest exercises the agent-worker Connect API end-to-end. Built for
+// Command awtest exercises the easyworker Connect API end-to-end. Built for
 // linux/windows/darwin and run ON the target platform against a local (or
 // remote) worker: Info, Execute, WatchJob streaming, JobOutput stream
 // filters, file round-trip + containment, kill. Platform-appropriate

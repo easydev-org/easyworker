@@ -39,7 +39,7 @@ The est protocol is specified in `abc-agent/worker-native/EST.md`.
 ## Layout
 
 ```
-cmd/agent-worker/       the binary (RPC + panel + job runner)
+cmd/easyworker/       the binary (RPC + panel + job runner)
 internal/a11y/          the a11y interfaces + the est/HTTP client (native/)
 internal/computer/      the ComputerService driver (forwards to the daemon)
 internal/jobsvc/        the job registry (memory + SQLite)

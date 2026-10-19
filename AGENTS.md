@@ -1,10 +1,10 @@
 # AGENTS.md — abcp-sdk/worker
 
 Working notes for agents editing this repo. This repo is the **single source of
-truth** for the `agent-worker` binary and every sandbox image a sandbox runs.
+truth** for the `easyworker` binary and every sandbox image a sandbox runs.
 See `README.md` for the fork's RPC/behavior deltas; this file covers the build.
 
-Deployment manifests are NOT here: the standalone `agent-worker` Deployments
+Deployment manifests are NOT here: the standalone `easyworker` Deployments
 (`worker-k8s/`) and the platform charts live in **`abc-protocol/deploy`**. This
 repo still owns the images (`Dockerfile`, `build-image.sh`, `agent-toolchain/`,
 `sandbox-images/`).
@@ -17,7 +17,7 @@ repo still owns the images (`Dockerfile`, `build-image.sh`, `agent-toolchain/`,
 | `sandbox-images/` | `build.sh [langs]` | `<reg>/sandbox/sandbox-<lang>:debian-trixie` | the ONLY images a sandbox may run |
 
 `agent-toolchain/` = plain distro + one toolchain, **no worker, no CA**.
-`sandbox-images/` = a toolchain base + `cmd/agent-worker` baked in. The gateway
+`sandbox-images/` = a toolchain base + `cmd/easyworker` baked in. The gateway
 no longer injects the worker at launch, so **any worker change requires
 rebuilding the `sandbox-*` images** (not just the toolchain ones).
 
@@ -126,7 +126,7 @@ fresh checkout has neither. A build without the needed cache artifact fails
 loudly with the missing filename (that is by design).
 
 `dist/` binaries are published as **GitHub Releases** (never committed to git):
-`v0.1.0` holds the six `agent-worker-*` binaries; `xa11y-v0.15.0` holds the
+`v0.1.0` holds the six `easyworker-*` binaries; `xa11y-v0.15.0` holds the
 three `xa11y-*` CLI binaries. A fresh checkout repopulates the worker binaries
 via `scripts/build-all.sh` and the xa11y ones via
 `scripts/build-xa11y.sh fetch` (or builds them from source — see that script).
@@ -223,7 +223,7 @@ and the worker installs them into `$WORKER_TOOLCHAIN_ROOT` (default
 
 - `WORKSPACE_TOOLCHAINS="go=1.27.1,node=26.9.0"` (env), and/or a `.toolchains`
   file in the workspace root (same `name=version` lines, `#` comments allowed);
-- `agent-worker toolchain-install go=1.27.1,node=26.9.0` (the CLI half);
+- `easyworker toolchain-install go=1.27.1,node=26.9.0` (the CLI half);
 - an implicit ensure before every `Execute` (a failure FAILS the job loudly —
   never a silent fallback to the bare base image).
 
@@ -411,7 +411,7 @@ the commit/comment claimed +x.)
 
 - Worker: `go build ./... && go vet ./... && go test ./...`.
 - Toolchain image: `skopeo inspect` and, for a language, `docker run … <lang> --version`.
-- Sandbox image: deploy `abc-protocol/deploy`'s `worker-k8s/agent-worker-*.yaml`
+- Sandbox image: deploy `abc-protocol/deploy`'s `worker-k8s/easyworker-*.yaml`
   and hit the worker's health endpoint on `:48080`; run `dist/awtest-<os>-amd64`
   for the full Connect surface.
 - `scripts/multi-test.sh` runs awtest on linux/windows/macos in one report.

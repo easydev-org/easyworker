@@ -7,7 +7,7 @@
 #   buildctl ... build \
 #     --opt filename=Containerfile.build \
 #     --output type=local,dest=./dist
-#   # -> dist/agent-worker  dist/webui/
+#   # -> dist/easyworker  dist/webui/
 #
 # Used by ./build.sh --artifacts. The final stage is `scratch`, so nothing is
 # packaged as an image; only the two trees are emitted.
@@ -35,9 +35,9 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . ./
 COPY --from=webui /webui/dist/ internal/webui/dist/
-RUN go build -trimpath -ldflags "-s -w" -o /out/agent-worker ./cmd/agent-worker
+RUN go build -trimpath -ldflags "-s -w" -o /out/easyworker ./cmd/easyworker
 
 # ---- artifacts (no image) ----
 FROM scratch AS artifacts
-COPY --from=build /out/agent-worker /bin/agent-worker
+COPY --from=build /out/easyworker /bin/easyworker
 COPY --from=webui /webui/dist /webui

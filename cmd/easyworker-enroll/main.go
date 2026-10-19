@@ -1,8 +1,8 @@
-// Command agent-worker-enroll performs the one-time exclusive claim against an
-// unclaimed agent-worker and prints the worker-issued bearer token. Operator use
+// Command easyworker-enroll performs the one-time exclusive claim against an
+// unclaimed easyworker and prints the worker-issued bearer token. Operator use
 // for externally-registered sandboxes / host runners:
 //
-//	agent-worker-enroll --addr http://host:8080 --code <code> [--owner me]
+//	easyworker-enroll --addr http://host:8080 --code <code> [--owner me]
 package main
 
 import (
@@ -23,7 +23,7 @@ func main() {
 	flag.Parse()
 
 	if *addr == "" {
-		fmt.Fprintln(os.Stderr, "usage: agent-worker-enroll --addr URL (--code CODE | --status)")
+		fmt.Fprintln(os.Stderr, "usage: easyworker-enroll --addr URL (--code CODE | --status)")
 		os.Exit(2)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

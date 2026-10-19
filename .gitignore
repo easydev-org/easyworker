@@ -32,5 +32,5 @@ go.work.sum
 /agent-toolchain/vm/macos/xcode/disk/
 /agent-toolchain/vm/windows/devtools/disk/
 /agent-toolchain/vm/*/repack-*/
-agent-worker
+easyworker
 dist/
