@@ -26,6 +26,42 @@ import (
 //go:embed all:dist
 var dist embed.FS
 
+// distEmbedded reports whether the embedded SPA is a REAL build or the
+// 14-byte stub some local build left behind.
+//
+// internal/webui/dist/ is git-ignored on purpose: the real panel comes from
+// the easyworker-webui repo in the Containerfile's node stage. The catch is
+// that a plain `go build` in a working tree with no dist/ fails outright
+// ("pattern all:dist: no matching files"), so people create a placeholder to
+// get it to compile — and then that placeholder gets EMBEDDED and shipped.
+// That is exactly how v0.2.0-v0.3.0 ended up serving "<html></html>" as the
+// control panel.
+//
+// It is logged once at startup instead of failing the build: the worker is
+// still fully functional over RPC without a panel, and refusing to start would
+// turn a cosmetic mistake into an outage.
+func distLooksStubbed() bool {
+	b, err := dist.ReadFile("dist/index.html")
+	if err != nil {
+		return true
+	}
+	return len(b) < 256
+}
+
+// PanelSize returns the byte length of the embedded index.html, so the caller
+// can log whether the panel looks real. A real SPA index is ~0.5 KB and pulls
+// /assets/*; the placeholder is <256 B.
+func PanelSize() int {
+	b, err := dist.ReadFile("dist/index.html")
+	if err != nil {
+		return 0
+	}
+	return len(b)
+}
+
+// PanelLooksStubbed reports whether the embedded panel is a placeholder.
+func PanelLooksStubbed() bool { return distLooksStubbed() }
+
 // Handler serves the panel: static assets by exact path, and index.html for
 // everything else (the SPA has no client-side routes, but this keeps deep
 // links harmless).
