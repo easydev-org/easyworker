@@ -5,7 +5,7 @@
 // pins the listen port there; the legacy default was 8080, sandboxes pin
 // 48080).
 //
-// Every command executes through the builtin mvdan.cc/sh/v3 interpreter —
+// Every command executes through the builtin easysh interpreter —
 // no passthrough, no fallback — so bash semantics are identical everywhere.
 package main
 

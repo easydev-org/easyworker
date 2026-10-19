@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package worker.v1;
 
-option go_package = "github.com/abcp-sdk/agent-worker/gen/worker/v1;workerv1";
+option go_package = "github.com/easydev-org/easyworker/gen/worker/v1;workerv1";
 
 // ComputerService is the worker-native GUI-automation surface. It replaces the
 // client-side command assembly that used to live in the workspace extension:

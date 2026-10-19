@@ -185,7 +185,12 @@ func (m *Manager) ExecuteNS(ctx context.Context, ns, command, workdir string, en
 		}()
 
 		shellh.Debugf("job %s: goroutine start (cmd=%q)", id, command)
-		res, err := m.runner.RunWithEnv(jobCtx, command, workdir, env, r, job.Stdout, job.Stderr)
+		// Capture the dataflow: a per-job sink persists every flow's bytes as
+		// they are produced (a pipe's intermediate result included), and the
+		// registry hook records each flow as it is created. Same shape as
+		// easysh's own daemon.
+		sink := &jobSink{store: m.store, jobID: id, seq: map[int64]int64{}}
+		res, err := m.runner.RunGraph(jobCtx, command, workdir, sink, sink.onRegistry, r, job.Stdout, job.Stderr)
 		shellh.Debugf("job %s: Run returned (err=%v, exit=%d, ctxErr=%v) mono=%d", id, err, res.ExitCode, jobCtx.Err() != nil, shellh.MonoMS())
 		// Promote a trailing partial line (output without final \n) into the
 		// history before signaling completion.
@@ -210,6 +215,10 @@ func (m *Manager) ExecuteNS(ctx context.Context, ns, command, workdir string, en
 		job.State = state
 		job.FinishedAt = time.Now().UnixMilli()
 		m.store.FinishJob(id, state, job.ExitCode, job.FinishedAt)
+		// Persist the easysh dataflow graph for this job (best-effort: a graph
+		// failure must never fail the job).
+		sink.flush()
+		m.storeGraph(id, sink.reg)
 		shellh.Debugf("job %s: state=%s exit=%d (done closing) mono=%d", id, state, job.ExitCode, shellh.MonoMS())
 	}()
 

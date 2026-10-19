@@ -54,7 +54,7 @@ func (s *WorkerService) Info(ctx context.Context, req *workerv1.InfoRequest) (*w
 	return &workerv1.InfoResponse{
 		Os:    goos(),
 		Arch:  goarch(),
-		Shell: "builtin(mvdan-sh)",
+		Shell: "builtin(easysh)",
 		// Slash-form so a Windows worker reports C:/... consistently to the UI.
 		Workspace:    filepath.ToSlash(s.files.Root()),
 		BootId:       s.bootID,

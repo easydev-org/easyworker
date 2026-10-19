@@ -1317,7 +1317,7 @@ const file_worker_v1_computer_proto_rawDesc = "" +
 	"\x06Scroll\x12 .worker.v1.ComputerScrollRequest\x1a!.worker.v1.ComputerScrollResponse\x12G\n" +
 	"\x04Drag\x12\x1e.worker.v1.ComputerDragRequest\x1a\x1f.worker.v1.ComputerDragResponse\x12Y\n" +
 	"\n" +
-	"Screenshot\x12$.worker.v1.ComputerScreenshotRequest\x1a%.worker.v1.ComputerScreenshotResponseB9Z7github.com/easydev-org/easyworker/gen/worker/v1;workerv1b\x06proto3"
+	"Screenshot\x12$.worker.v1.ComputerScreenshotRequest\x1a%.worker.v1.ComputerScreenshotResponseB:Z8github.com/easydev-org/easyworker/gen/worker/v1;workerv1b\x06proto3"
 
 var (
 	file_worker_v1_computer_proto_rawDescOnce sync.Once

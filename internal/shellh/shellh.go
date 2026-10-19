@@ -103,6 +103,23 @@ type Result struct {
 	Graph *flow.Registry
 }
 
+// RunGraph runs command with a per-run Sink and a Registry hook, so the caller
+// observes the whole dataflow: every flow's bytes as they are produced (via the
+// sink) and every flow as it is created (via the hook). It is the same shape
+// easysh's own daemon uses. A nil sink captures nothing.
+//
+// It does NOT replace the runner: exec.Runner is a SESSION (variables, funcs,
+// cwd persist across calls), so a fresh one would drop that state. Only the
+// run-scoped Sink and the registry hook change.
+func (r *Runner) RunGraph(ctx context.Context, command, workdir string, sink flow.Sink,
+	onRegistry func(*flow.Registry), stdin io.Reader, stdout, stderr io.Writer) (Result, error) {
+	// The hook is how a caller observes each run's registry; the sink rides on
+	// the run itself (RunWithEnv passes it through exec's options).
+	r.proc.SetRegistryHook(onRegistry)
+	r.proc.SetSink(sink)
+	return r.run(ctx, command, workdir, r.envList(), stdin, stdout, stderr)
+}
+
 // RunWithEnv is Run with a per-job env overlay and explicit streams.
 func (r *Runner) RunWithEnv(ctx context.Context, command, workdir string, env map[string]string, stdin io.Reader, stdout, stderr io.Writer) (Result, error) {
 	eff := r.envList()

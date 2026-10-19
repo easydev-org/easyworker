@@ -47,7 +47,7 @@ func TestInfo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Shell != "builtin(mvdan-sh)" {
+	if info.Shell != "builtin(easysh)" {
 		t.Errorf("shell = %q", info.Shell)
 	}
 	if info.Workspace == "" {
