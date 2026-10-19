@@ -189,7 +189,16 @@ func (m *Manager) ExecuteNS(ctx context.Context, ns, command, workdir string, en
 		// they are produced (a pipe's intermediate result included), and the
 		// registry hook records each flow as it is created. Same shape as
 		// easysh's own daemon.
-		sink := &jobSink{store: m.store, jobID: id, seq: map[int64]int64{}}
+		// buf MUST be allocated here as well as lazily in Enqueue: the first
+		// write of a command reaches Enqueue before onRegistry hands over the
+		// graph, and an unallocated map there was a nil-map panic that killed
+		// the worker process mid-job.
+		sink := &jobSink{
+			store: m.store,
+			jobID: id,
+			seq:   map[int64]int64{},
+			buf:   map[int64][]byte{},
+		}
 		res, err := m.runner.RunGraph(jobCtx, command, workdir, sink, sink.onRegistry, r, job.Stdout, job.Stderr)
 		shellh.Debugf("job %s: Run returned (err=%v, exit=%d, ctxErr=%v) mono=%d", id, err, res.ExitCode, jobCtx.Err() != nil, shellh.MonoMS())
 		// Promote a trailing partial line (output without final \n) into the

@@ -143,6 +143,23 @@ func (g *Gate) Code() string {
 // Disabled reports whether auth is turned off.
 func (g *Gate) Disabled() bool { return g.disabled }
 
+// LocalToken returns the token this process is currently authorizing with.
+//
+// It is for IN-PROCESS use only — right now that is the /desktop/ proxy, which
+// must present the worker's own token to the easystream daemon so the desktop
+// is drivable (Control) rather than a read-only picture (View). The token is
+// never handed to a browser; it is injected server-side on the way through.
+// It is deliberately NOT exposed over RPC: everything on the wire keeps using
+// Authorized().
+func (g *Gate) LocalToken() string {
+	if g.disabled {
+		return ""
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.token
+}
+
 // Resumed reports whether this process recovered a persisted token at boot
 // (no re-claim needed).
 func (g *Gate) Resumed() bool {

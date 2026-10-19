@@ -35,6 +35,14 @@ type jobSink struct {
 // Enqueue implements flow.Sink.
 func (s *jobSink) Enqueue(fid flow.FID, p []byte) {
 	s.mu.Lock()
+	// Enqueue is called by flow.TapBuffer as soon as a command writes output,
+	// which can be BEFORE onRegistry runs (the registry is only handed over once
+	// the graph is built). Relying on onRegistry to allocate s.buf therefore
+	// panicked with "assignment to entry in nil map" and took the whole worker
+	// process down — the first write of any job could kill the sandbox.
+	if s.buf == nil {
+		s.buf = make(map[int64][]byte)
+	}
 	s.buf[int64(fid)] = append(s.buf[int64(fid)], p...)
 	s.mu.Unlock()
 }

@@ -65,6 +65,11 @@ message Capabilities {
   bool novnc = 3;
   // The port `novnc` was detected on (0 when absent; default probe 6080).
   int32 novnc_port = 4;
+  // An HTTP easystream daemon answers on loopback, so the worker can proxy its
+  // full UI at /desktop/. False on Android, where easystream is an APK that
+  // speaks only the binary est protocol on :48079 — there the panel must use
+  // the worker's own /est/ws stream instead.
+  bool est_http = 11;
   // The `xa11y` accessibility CLI is on PATH (native-app automation, X11).
   bool xa11y = 5;
   // /etc/os-release ID (e.g. "debian", "alpine", "ubuntu"); "" if unknown.
