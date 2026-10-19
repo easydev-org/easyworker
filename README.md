@@ -56,3 +56,46 @@ proto/, gen/            the Connect RPC definitions and generated code
 go build ./...
 go test ./...
 ```
+
+## Naming: this used to be `agent-worker`
+
+The binary was called **`agent-worker`** and that name leaked everywhere — the
+release assets, the in-image path (`/opt/agent-worker`), the log prefix and the
+default sqlite file. Everything is now **`easyworker`**, matching the repo.
+
+| | old | new |
+|---|---|---|
+| binary / command dir | `agent-worker` | `easyworker` |
+| release assets | `agent-worker-{linux,windows,darwin}-amd64` | `easyworker-{linux,windows,darwin}-amd64` |
+| in-image path | `/opt/agent-worker/` | `/opt/easyworker/` |
+| log prefix | `agent-worker listening …` | `easyworker listening …` |
+| default sqlite | `agent-worker.db` | `easyworker.db` |
+| systemd / launchd labels | `com.agentworker.*` | `com.easyworker.*` |
+
+**This is breaking for anything that pins the old asset names.** A sandbox
+image that sets `WORKER_VERSION` must move to a release that carries the new
+names (v0.3.0 onward).
+
+## Capabilities: is `git` usable?
+
+A job that needs a repository runs `git clone`, but support differs per
+platform — macOS, Windows and the desktop Linux images ship git, the Android
+guest has none at all, and a binary copied from a glibc host is
+present-but-unrunnable under bionic. `Info.capabilities` answers this up front:
+
+```jsonc
+"capabilities": {
+  "git": true,
+  "gitVersion": "2.55.0.windows.5"
+}
+```
+
+The probe **runs `git --version`** rather than trusting `PATH`, so a broken or
+foreign binary reports `git: false` instead of failing halfway through a job.
+`git` and `gitVersion` are omitted (proto3 default = false / empty) when git is
+unavailable. The answer is also logged once at boot:
+
+```
+git: 2.55.0.windows.5
+git: not available (jobs cannot clone/commit on this platform)
+```
