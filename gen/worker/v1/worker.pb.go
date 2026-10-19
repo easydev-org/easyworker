@@ -214,7 +214,13 @@ type Capabilities struct {
 	// linux-x11 | linux-wayland | windows | macos | android | ios.
 	Platform string `protobuf:"bytes,7,opt,name=platform,proto3" json:"platform,omitempty"`
 	// The ComputerService is usable (a GUI platform with its tooling present).
-	Computer      bool `protobuf:"varint,8,opt,name=computer,proto3" json:"computer,omitempty"`
+	Computer bool `protobuf:"varint,8,opt,name=computer,proto3" json:"computer,omitempty"`
+	// `git` is on PATH, so jobs can clone/commit. Probed with `git --version`
+	// (not just LookPath: a stub/shim that cannot run is NOT a usable git).
+	Git bool `protobuf:"varint,9,opt,name=git,proto3" json:"git,omitempty"`
+	// The git version string reported by `git --version` (e.g. "2.55.0"),
+	// or "" when git is absent or did not run.
+	GitVersion    string `protobuf:"bytes,10,opt,name=git_version,json=gitVersion,proto3" json:"git_version,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -303,6 +309,20 @@ func (x *Capabilities) GetComputer() bool {
 		return x.Computer
 	}
 	return false
+}
+
+func (x *Capabilities) GetGit() bool {
+	if x != nil {
+		return x.Git
+	}
+	return false
+}
+
+func (x *Capabilities) GetGitVersion() string {
+	if x != nil {
+		return x.GitVersion
+	}
+	return ""
 }
 
 // Execute always registers a job (no fast/slow split, same as legacy worker).
@@ -2789,7 +2809,7 @@ const file_worker_v1_worker_proto_rawDesc = "" +
 	"\aboot_id\x18\x05 \x01(\tR\x06bootId\x12#\n" +
 	"\rdropped_lines\x18\x06 \x01(\x03R\fdroppedLines\x12\x12\n" +
 	"\x04home\x18\a \x01(\tR\x04home\x12;\n" +
-	"\fcapabilities\x18\b \x01(\v2\x17.worker.v1.CapabilitiesR\fcapabilities\"\xdd\x01\n" +
+	"\fcapabilities\x18\b \x01(\v2\x17.worker.v1.CapabilitiesR\fcapabilities\"\x90\x02\n" +
 	"\fCapabilities\x12\x18\n" +
 	"\adesktop\x18\x01 \x01(\bR\adesktop\x12\x18\n" +
 	"\adisplay\x18\x02 \x01(\tR\adisplay\x12\x14\n" +
@@ -2799,7 +2819,11 @@ const file_worker_v1_worker_proto_rawDesc = "" +
 	"\x05xa11y\x18\x05 \x01(\bR\x05xa11y\x12\x16\n" +
 	"\x06distro\x18\x06 \x01(\tR\x06distro\x12\x1a\n" +
 	"\bplatform\x18\a \x01(\tR\bplatform\x12\x1a\n" +
-	"\bcomputer\x18\b \x01(\bR\bcomputer\"\xef\x01\n" +
+	"\bcomputer\x18\b \x01(\bR\bcomputer\x12\x10\n" +
+	"\x03git\x18\t \x01(\bR\x03git\x12\x1f\n" +
+	"\vgit_version\x18\n" +
+	" \x01(\tR\n" +
+	"gitVersion\"\xef\x01\n" +
 	"\x0eExecuteRequest\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\tR\acommand\x12\x18\n" +
 	"\aworkdir\x18\x02 \x01(\tR\aworkdir\x124\n" +

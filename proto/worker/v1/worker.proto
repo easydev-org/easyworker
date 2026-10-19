@@ -74,6 +74,12 @@ message Capabilities {
   string platform = 7;
   // The ComputerService is usable (a GUI platform with its tooling present).
   bool computer = 8;
+  // `git` is on PATH, so jobs can clone/commit. Probed with `git --version`
+  // (not just LookPath: a stub/shim that cannot run is NOT a usable git).
+  bool git = 9;
+  // The git version string reported by `git --version` (e.g. "2.55.0"),
+  // or "" when git is absent or did not run.
+  string git_version = 10;
 }
 
 // ---- jobs ----

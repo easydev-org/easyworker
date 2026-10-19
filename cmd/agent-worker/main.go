@@ -192,6 +192,14 @@ func main() {
 	}
 	log.Printf("agent-worker listening on %s (os=%s arch=%s workspace=%s shell=builtin)",
 		listen, runtime.GOOS, runtime.GOARCH, ws)
+	// Say whether `git` is usable, once, at boot: a job that needs a repo
+	// fails confusingly later otherwise (and on Android there is no git at all,
+	// which is expected, not a fault). Reported in Info.capabilities too.
+	if c := internal.CapabilitiesProbe(); c.Git {
+		log.Printf("git: %s", c.GitVersion)
+	} else {
+		log.Printf("git: not available (jobs cannot clone/commit on this platform)")
+	}
 
 	// Graceful shutdown on SIGINT/SIGTERM (k8s sends SIGTERM before killing
 	// the pod): stop accepting, let in-flight RPCs finish, kill running jobs
