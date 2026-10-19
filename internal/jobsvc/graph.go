@@ -63,7 +63,7 @@ func (s *jobSink) flush() {
 		if len(b) > maxFlowContent {
 			b = b[:maxFlowContent]
 		}
-		if err := s.store.Flow.PutBytes(s.jobID, fid, b); err != nil {
+		if err := s.store.putBytesRetry(s.jobID, fid, b); err != nil {
 			fmt.Printf("store: flow content %s/%d: %v\n", s.jobID, fid, err)
 		}
 	}
