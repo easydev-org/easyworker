@@ -1,0 +1,142 @@
+name: release
+
+# Build the worker for every supported platform and attach the binaries to the
+# GitHub Release for the pushed tag.
+#
+# WHY THIS EXISTS
+#
+# The release assets used to be produced BY HAND, and that is exactly how a
+# broken asset got published: the linux/amd64 binary for v0.3.7 was built without
+# CGO_ENABLED=0, so it was dynamically linked against glibc
+#
+#   Requesting program interpreter: /lib64/ld-linux-x86-64.so.2
+#   NEEDED: libc.so.6
+#
+# Everything looked fine — the binary ran on the build host — but the Android
+# sandbox runs it inside the emulator, where that interpreter does not exist, so
+# the kernel refused to exec it:
+#
+#   setsid: exec /data/local/tmp/easyworker: No such file or directory
+#
+# "No such file or directory" for a file that is present and executable means
+# the ELF INTERPRETER is missing, not the binary. A machine cannot make that
+# mistake: CGO_ENABLED=0 here is not negotiable, and the static-ness is asserted
+# below before anything is uploaded.
+#
+# Targets: linux/darwin/windows x amd64/arm64, all CGO_ENABLED=0 (pure Go), so
+# one binary runs on glibc, musl, macOS, Windows and Android's bionic alike.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build assets for"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  # No CGO anywhere: this is what makes the binaries static. See above.
+  CGO_ENABLED: "0"
+  GOFLAGS: "-mod=mod -trimpath"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: windows, goarch: amd64, ext: ".exe" }
+          - { goos: windows, goarch: arm64, ext: ".exe" }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The control-panel SPA is //go:embed-ed from internal/webui/dist, and the
+      # repo only carries a placeholder (the real dist comes from
+      # easyworker-webui at image-build time). Without this the Go build fails on
+      # a missing embed pattern.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: build the SPA
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch main \
+            https://github.com/easydev-org/easyworker-webui.git /tmp/webui
+          cd /tmp/webui
+          npm ci --no-audit --no-fund
+          OUT_DIR=dist npm run build
+          mkdir -p "$GITHUB_WORKSPACE/internal/webui/dist"
+          cp -a dist/. "$GITHUB_WORKSPACE/internal/webui/dist/"
+          echo "SPA files: $(find "$GITHUB_WORKSPACE/internal/webui/dist" -type f | wc -l)"
+
+      - name: go test
+        run: go test ./...
+
+      - name: build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          out="easyworker-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
+          go build -ldflags "-s -w" -o "/tmp/$out" ./cmd/easyworker
+          ls -l "/tmp/$out"
+          echo "ARTIFACT=$out" >> "$GITHUB_ENV"
+
+      # Assert the binary really is self-contained before it can be published.
+      # A dynamically linked linux build is silently wrong: it runs on the build
+      # machine and fails with ENOENT on any host without the same glibc.
+      - name: verify static (linux)
+        if: matrix.goos == 'linux'
+        run: |
+          set -euo pipefail
+          if readelf -l "/tmp/$ARTIFACT" | grep -q INTERP; then
+            echo "::error::$ARTIFACT is dynamically linked (has an ELF interpreter); CGO_ENABLED=0 must be honoured"
+            readelf -l "/tmp/$ARTIFACT" | sed -n '/INTERP/,+1p'
+            exit 1
+          fi
+          echo "$ARTIFACT is static (no INTERP): OK"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.goos }}-${{ matrix.goarch }}
+          path: /tmp/easyworker-*
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/assets
+          merge-multiple: true
+
+      - name: list assets
+        run: ls -l /tmp/assets
+
+      - name: publish
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: /tmp/assets/easyworker-*
+          fail_on_unmatched_files: true
+          # The release body is written by hand at tag time (the annotated tag
+          # explains the change); do not overwrite it here.
+          generate_release_notes: false

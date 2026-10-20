@@ -4,6 +4,11 @@
 /worker-bin/
 .last-image
 
+# Release staging dirs (rel4, rel5, rel10, ...). These are scratch output from
+# manual release runs; they accumulated untracked and would otherwise be swept
+# into the next `git add -A`.
+/rel[0-9]*/
+
 # agent-toolchain: multi-GB pre-downloaded build artifacts (rebuilt by
 # agent-toolchain/build-toolchain.sh -> fetch-artifacts.sh); never committed.
 /agent-toolchain/cache/
