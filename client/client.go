@@ -1,4 +1,4 @@
-// Package client is the reusable agent-worker client: it performs the one-time
+// Package client is the reusable easyworker client: it performs the one-time
 // exclusive enrollment handshake and builds a bearer-authenticated
 // WorkerService client. Any service (easylab, a controller, an operator CLI)
 // can import it without depending on easylab.
