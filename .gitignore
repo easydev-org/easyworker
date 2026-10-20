@@ -37,5 +37,16 @@ go.work.sum
 /agent-toolchain/vm/macos/xcode/disk/
 /agent-toolchain/vm/windows/devtools/disk/
 /agent-toolchain/vm/*/repack-*/
-easyworker
+# The compiled binary at the repo root — ANCHORED.
+#
+# The bare pattern `easyworker` matched at ANY depth, so it also ignored
+# cmd/easyworker/ — which is the worker's main package. The directory was
+# therefore never committed: `git status` was clean, the source was on disk, and
+# every image build and CI run failed at
+#
+#   go build ./cmd/easyworker   -> no such directory
+#
+# while nothing anywhere said a file was missing. A leading slash constrains the
+# pattern to the repo root, which is what was intended.
+/easyworker
 dist/
