@@ -73,9 +73,17 @@ jobs:
           node-version: "22"
 
       - name: build the SPA
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          git clone --depth 1 --branch main \
+          # Pin the UI to its newest RELEASE, not to main. A branch tip is
+          # not reproducible: this build would embed whatever happened to be
+          # pushed, with nothing recording which commit it was.
+          u=$(gh release view --repo easydev-org/easyworker-webui --json tagName -q .tagName) \
+            || { echo "::error::easydev-org/easyworker-webui has no Release to pin to"; exit 1; }
+          echo "ui=easydev-org/easyworker-webui@$u"
+          git clone --depth 1 --branch "$u" \
             https://github.com/easydev-org/easyworker-webui.git /tmp/webui
           cd /tmp/webui
           npm ci --no-audit --no-fund
