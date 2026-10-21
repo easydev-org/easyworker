@@ -1,0 +1,76 @@
+name: ci
+
+# Check every push and pull request: vet, test, and build the worker.
+#
+# release.yml is tag-only, so a push to main ran nothing.
+#
+# THE SPA MUST BE BUILT FIRST. internal/webui/dist does not exist in the
+# repository — it is a placeholder in the image build — and //go:embed in
+# webui.go requires the directory to contain files. A bare `go build ./...`
+# therefore fails with "no matching files found", which reads like a source bug
+# rather than a missing build step.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # The worker ships to hosts with different libcs: glibc, musl (alpine), and
+  # bionic (the Android guest runs this same binary inside the emulator). A
+  # dynamically linked build fails there with ENOENT for a file that exists —
+  # the ELF interpreter is what is missing.
+  CGO_ENABLED: "0"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # The SPA that //go:embed inlines. dist/ is not committed, so this is not
+      # optional: without it every go step fails on the embed pattern.
+      - name: build the SPA
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch main \
+            https://github.com/easydev-org/easyworker-webui.git /tmp/webui
+          cd /tmp/webui
+          npm ci --no-audit --no-fund
+          OUT_DIR=dist npm run build
+          mkdir -p "$GITHUB_WORKSPACE/internal/webui/dist"
+          cp -a dist/. "$GITHUB_WORKSPACE/internal/webui/dist/"
+          echo "SPA files: $(find "$GITHUB_WORKSPACE/internal/webui/dist" -type f | wc -l)"
+
+      - run: go vet ./...
+
+      - run: go test ./...
+
+      - run: go build ./...
+
+      # Static-ness is the property that was silently wrong once: a dynamically
+      # linked linux binary ran on the build host and failed on every other host
+      # with "No such file or directory" for a file that was present.
+      - name: assert the binary is static
+        run: |
+          set -euo pipefail
+          go build -ldflags "-s -w" -o /tmp/easyworker ./cmd/easyworker
+          if readelf -l /tmp/easyworker | grep -q INTERP; then
+            echo "::error::binary is dynamically linked (has an ELF interpreter)"
+            readelf -l /tmp/easyworker | sed -n '/INTERP/,+1p'
+            exit 1
+          fi
+          echo "static: OK"
