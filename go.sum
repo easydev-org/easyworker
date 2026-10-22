@@ -10,6 +10,8 @@ github.com/easydev-org/easysh v0.0.0-20261020093803-946ceccb3ace h1:JXf257b1hTIC
 github.com/easydev-org/easysh v0.0.0-20261020093803-946ceccb3ace/go.mod h1:39dqc1umlCHTZtmG/Roewz/JjUbKbolrGY7OpupDAzI=
 github.com/easydev-org/easysh v0.1.0 h1:GO+sJwkAqmt6a/qZEyJDiRG5FadrXwf5Wdt2gUpzVvo=
 github.com/easydev-org/easysh v0.1.0/go.mod h1:39dqc1umlCHTZtmG/Roewz/JjUbKbolrGY7OpupDAzI=
+github.com/easydev-org/easysh v0.1.1-0.20261022222723-67ce76945bc6 h1:Lo/6FgviS2fkEpC2xVSHcKV3lAptre/Vf23w7HjfB/U=
+github.com/easydev-org/easysh v0.1.1-0.20261022222723-67ce76945bc6/go.mod h1:39dqc1umlCHTZtmG/Roewz/JjUbKbolrGY7OpupDAzI=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
 github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
 github.com/google/pprof v0.0.0-20260802141513-ef3492d7dac3 h1:LMLX+LgTNWpfvCBdFebv6EsYotImrt/Ppc5cXIriCSo=

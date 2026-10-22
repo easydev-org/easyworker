@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	connectrpc.com/connect/v2 v2.0.0
-	github.com/easydev-org/easysh v0.1.0
+	github.com/easydev-org/easysh v0.1.1-0.20261022222723-67ce76945bc6
 	github.com/ulikunitz/xz v0.5.16
 	golang.org/x/net v0.50.0
 	golang.org/x/sys v0.49.0
