@@ -1,12 +1,20 @@
-// Package shellh runs commands through the easysh shell engine. It replaces the
-// old mvdan.cc/sh interpreter. easysh is a flow-first shell whose every stream
-// is an observable Flow, so a job's output (and its intermediate pipes) come
-// with a dataflow graph for free; it also accepts POSIX sh / bash syntax
-// (assignments, ${...} expansion, $(...), f(){}, case ... ;; esac, until, ...),
-// so AI-generated and pasted scripts run unmodified.
+// Package shellh runs commands through the easyscript engine.
 //
-// The public surface is unchanged — Runner, LineBuffer, LineRec, Debugf — so
-// jobsvc keeps working; only the engine underneath is easysh.
+// History: this used to wrap easysh (a flow-first shell whose every stream was an
+// observable Flow, which gave the panel a dataflow graph for free). easyscript
+// replaced it: it runs a program TEXT in any installed interpreter — bash today,
+// python/node/perl/... as they become useful — with the same background/kill
+// semantics, but with NO flow graph. Output is an ordered stdout/stderr line
+// stream and nothing else, so JobGraph/JobFlow are gone from the worker.
+//
+// What that costs, stated plainly:
+//   - no dataflow topology (which pipe carried what)
+//   - no session state: easyscript runs each command as its own process, so a
+//     `cd` or a variable does NOT carry into the next job. Callers must pass the
+//     working directory on every run (jobsvc already resolves one per job).
+//
+// The public surface stays the same shape jobsvc already uses — Runner, Result,
+// LineBuffer, LineRec, Debugf — so only the engine underneath changed.
 package shellh
 
 import (
@@ -19,35 +27,58 @@ import (
 	"sync"
 	"time"
 
-	"github.com/easydev-org/easysh/pkg/exec"
-	"github.com/easydev-org/easysh/pkg/flow"
+	"github.com/easydev-org/easyscript/pkg/engine"
 )
 
-// Runner executes command strings through the easysh engine.
+// DefaultLanguage is the language a job runs in when the caller does not pick
+// one. bash is the closest thing to what this worker used to promise: POSIX sh
+// and bash syntax, available on every image the worker ships in.
+const DefaultLanguage = "bash"
+
+// Runner executes command strings through the easyscript engine.
 type Runner struct {
 	workspace string
 
 	mu   sync.RWMutex
 	env  []string
-	proc *exec.Runner // the easysh runner: persistent session (vars/funcs/cwd)
+	eng  *engine.Engine
+	lang string
 }
 
 // New creates a Runner whose relative paths resolve against workspace.
 func New(workspace string, env []string) *Runner {
-	r := &Runner{workspace: workspace, env: env}
-	r.proc = exec.New(exec.Options{
-		Dir:       workspace,
-		Env:       env,
-		Capture:   true,
-		RingLines: 10000,
-	})
+	r := &Runner{workspace: workspace, env: env, lang: DefaultLanguage}
+	r.eng = engine.New(engine.Options{Dir: workspace, Env: env})
 	return r
 }
 
 // Workspace returns the root every relative path resolves against.
 func (r *Runner) Workspace() string { return r.workspace }
 
-// envList returns the current base environment.
+// Language reports the language jobs run in by default.
+func (r *Runner) Language() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.lang
+}
+
+// SetLanguage changes the default language for future jobs. An unknown or
+// unusable id is rejected here rather than at job time, so a misconfiguration
+// fails loudly at startup instead of silently on the first command.
+func (r *Runner) SetLanguage(id string) error {
+	if _, err := r.eng.Resolve(context.Background(), id); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	r.lang = id
+	r.mu.Unlock()
+	return nil
+}
+
+// Engine exposes the underlying engine for callers that need the probe (the
+// worker's Info RPC reports which interpreters exist).
+func (r *Runner) Engine() *engine.Engine { return r.eng }
+
 func (r *Runner) envList() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -62,36 +93,29 @@ func (r *Runner) AddPaths(dirs ...string) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	cur, idx := "", -1
-	for i, kv := range r.env {
+	path := ""
+	for _, kv := range r.env {
 		if strings.HasPrefix(kv, "PATH=") {
-			cur, idx = kv[len("PATH="):], i
+			path = kv[len("PATH="):]
 			break
 		}
 	}
-	parts := strings.Split(cur, string(os.PathListSeparator))
-	have := map[string]bool{}
-	for _, p := range parts {
-		have[p] = true
+	if path == "" {
+		path = os.Getenv("PATH")
 	}
-	var prepend []string
-	for _, d := range dirs {
-		if d == "" || have[d] {
+	add := strings.Join(dirs, string(os.PathListSeparator))
+	r.env = nil
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(kv, "PATH=") {
 			continue
 		}
-		have[d] = true
-		prepend = append(prepend, d)
+		r.env = append(r.env, kv)
 	}
-	if len(prepend) == 0 {
-		return
-	}
-	newPath := strings.Join(append(prepend, parts...), string(os.PathListSeparator))
-	if idx >= 0 {
-		r.env[idx] = "PATH=" + newPath
-	} else {
-		r.env = append(r.env, "PATH="+newPath)
-	}
-	r.proc = exec.New(exec.Options{Dir: r.workspace, Env: r.env, Capture: true, RingLines: 10000})
+	r.env = append(r.env, "PATH="+add+string(os.PathListSeparator)+path)
+	// The engine holds its own copy of the environment, so rebuild it; the probe
+	// cache is invalidated too, because a newly installed interpreter must be
+	// discoverable without restarting the worker.
+	r.eng = engine.New(engine.Options{Dir: r.workspace, Env: r.env})
 }
 
 // Result is the outcome of one run.
@@ -99,28 +123,14 @@ type Result struct {
 	ExitCode int
 	Stdout   string
 	Stderr   string
-	// Graph is the job's dataflow (easysh-specific); nil when capture is off.
-	Graph *flow.Registry
-}
-
-// RunGraph runs command with a per-run Sink and a Registry hook, so the caller
-// observes the whole dataflow: every flow's bytes as they are produced (via the
-// sink) and every flow as it is created (via the hook). It is the same shape
-// easysh's own daemon uses. A nil sink captures nothing.
-//
-// It does NOT replace the runner: exec.Runner is a SESSION (variables, funcs,
-// cwd persist across calls), so a fresh one would drop that state. Only the
-// run-scoped Sink and the registry hook change.
-func (r *Runner) RunGraph(ctx context.Context, command, workdir string, sink flow.Sink,
-	onRegistry func(*flow.Registry), stdin io.Reader, stdout, stderr io.Writer) (Result, error) {
-	// The hook is how a caller observes each run's registry; the sink rides on
-	// the run itself (RunWithEnv passes it through exec's options).
-	r.proc.SetRegistryHook(onRegistry)
-	r.proc.SetSink(sink)
-	return r.run(ctx, command, workdir, r.envList(), stdin, stdout, stderr)
 }
 
 // RunWithEnv is Run with a per-job env overlay and explicit streams.
+//
+// The overlay is applied by rebuilding the engine's environment for this run
+// only: easyscript deliberately has no per-job env override (an override is
+// either an overlay to explain or a replacement that quietly drops PATH), so the
+// worker composes the full environment itself and hands that over.
 func (r *Runner) RunWithEnv(ctx context.Context, command, workdir string, env map[string]string, stdin io.Reader, stdout, stderr io.Writer) (Result, error) {
 	eff := r.envList()
 	for k, v := range env {
@@ -134,7 +144,7 @@ func (r *Runner) Run(ctx context.Context, command, workdir string, stdin io.Read
 	return r.run(ctx, command, workdir, r.envList(), stdin, stdout, stderr)
 }
 
-// run resolves the cwd and delegates to the easysh engine.
+// run resolves the cwd and delegates to the easyscript engine.
 func (r *Runner) run(ctx context.Context, command, workdir string, env []string, stdin io.Reader, stdout, stderr io.Writer) (Result, error) {
 	dir := r.workspace
 	if workdir != "" {
@@ -144,17 +154,33 @@ func (r *Runner) run(ctx context.Context, command, workdir string, env []string,
 			dir = filepath.Join(r.workspace, filepath.FromSlash(workdir))
 		}
 	}
-	res, err := r.proc.RunWithEnv(ctx, command, dir, env, stdin, stdout, stderr)
-	out := Result{Graph: nil}
-	if res != nil {
-		out.ExitCode = res.ExitCode
-		out.Graph = res.Registry
+	r.mu.RLock()
+	lang := r.lang
+	eng := r.eng
+	r.mu.RUnlock()
+
+	// A per-run engine keeps the env overlay local. It shares the probe cache
+	// with the base engine only in spirit; constructing one per job is cheap
+	// (a probe is cached per Engine, and detection happened at startup).
+	if len(env) > 0 {
+		eng = engine.New(engine.Options{Dir: r.workspace, Env: env})
 	}
-	return out, err
+
+	code, err := eng.Run(ctx, engine.Spec{
+		Lang:  lang,
+		Code:  command,
+		Dir:   dir,
+		Stdin: stdin,
+	}, stdout, stderr)
+	return Result{ExitCode: code}, err
 }
 
 // KillAll reaps every process tree this runner has started (worker shutdown).
-func (r *Runner) KillAll() { r.proc.KillAll() }
+//
+// easyscript tracks jobs individually, so this is a no-op: jobs are killed by
+// their own Kill or by their context. Kept for API compatibility with callers
+// that shut the worker down in one gesture.
+func (r *Runner) KillAll() {}
 
 // ── line buffering (unchanged from the mvdan runner; jobsvc depends on it) ──
 

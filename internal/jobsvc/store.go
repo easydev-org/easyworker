@@ -12,7 +12,6 @@ import (
 
 	_ "modernc.org/sqlite" // pure-Go driver (CGO_ENABLED=0 discipline)
 
-	esstore "github.com/easydev-org/easysh/pkg/store"
 	"github.com/easydev-org/easyworker/internal/shellh"
 )
 
@@ -22,10 +21,10 @@ import (
 // is ephemeral to the pod — a container restart (same pod) keeps it, a pod
 // recreation wipes it. Retention trims finished jobs past the window.
 type Store struct {
-	db      *sql.DB
-	// Flow is the shared dataflow-graph store (the same SQL easysh uses), so
-	// the worker persists the graph without duplicating any of it.
-	Flow    *esstore.FlowStore
+	db *sql.DB
+	// NOTE: the easysh FlowStore used to live here (the dataflow graph). The
+	// engine is easyscript now, which has no graph, so the table and the field
+	// are gone. Jobs are metadata + an ordered line stream, nothing more.
 	ch      chan interface{}
 	done    chan struct{}
 	stopped chan struct{}
@@ -75,14 +74,6 @@ func OpenStore(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	// The dataflow graph is stored by easysh's own FlowStore (the SQL lives
-	// there, shared with easysh), not duplicated here.
-	fs, err := esstore.NewFlowStore(db)
-	if err != nil {
-		db.Close()
-		return nil, err
-	}
-	s.Flow = fs
 	if err := s.recover(); err != nil {
 		db.Close()
 		return nil, err

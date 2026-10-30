@@ -185,21 +185,10 @@ func (m *Manager) ExecuteNS(ctx context.Context, ns, command, workdir string, en
 		}()
 
 		shellh.Debugf("job %s: goroutine start (cmd=%q)", id, command)
-		// Capture the dataflow: a per-job sink persists every flow's bytes as
-		// they are produced (a pipe's intermediate result included), and the
-		// registry hook records each flow as it is created. Same shape as
-		// easysh's own daemon.
-		// buf MUST be allocated here as well as lazily in Enqueue: the first
-		// write of a command reaches Enqueue before onRegistry hands over the
-		// graph, and an unallocated map there was a nil-map panic that killed
-		// the worker process mid-job.
-		sink := &jobSink{
-			store: m.store,
-			jobID: id,
-			seq:   map[int64]int64{},
-			buf:   map[int64][]byte{},
-		}
-		res, err := m.runner.RunGraph(jobCtx, command, workdir, sink, sink.onRegistry, r, job.Stdout, job.Stderr)
+		// easyscript has no dataflow graph: output is an ordered stdout/stderr
+		// line stream, and that is all the panel gets. The per-job sink that used
+		// to persist every flow's bytes is gone with it.
+		res, err := m.runner.RunWithEnv(jobCtx, command, workdir, nil, r, job.Stdout, job.Stderr)
 		shellh.Debugf("job %s: Run returned (err=%v, exit=%d, ctxErr=%v) mono=%d", id, err, res.ExitCode, jobCtx.Err() != nil, shellh.MonoMS())
 		// Promote a trailing partial line (output without final \n) into the
 		// history before signaling completion.
@@ -224,10 +213,6 @@ func (m *Manager) ExecuteNS(ctx context.Context, ns, command, workdir string, en
 		job.State = state
 		job.FinishedAt = time.Now().UnixMilli()
 		m.store.FinishJob(id, state, job.ExitCode, job.FinishedAt)
-		// Persist the easysh dataflow graph for this job (best-effort: a graph
-		// failure must never fail the job).
-		sink.flush()
-		m.storeGraph(id, sink.reg)
 		shellh.Debugf("job %s: state=%s exit=%d (done closing) mono=%d", id, state, job.ExitCode, shellh.MonoMS())
 	}()
 

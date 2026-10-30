@@ -65,7 +65,7 @@ func main() {
 		fmt.Printf("FATAL Info: %v\n", err)
 		os.Exit(1)
 	}
-	check("info", info.Shell == "builtin(easysh)",
+	check("info", info.Shell == "easyscript(bash)",
 		fmt.Sprintf("os=%s arch=%s shell=%s boot=%s", info.Os, info.Arch, info.Shell, short(info.BootId)))
 
 	// ---- Execute + watch ----
