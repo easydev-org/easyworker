@@ -17,7 +17,7 @@ func TestResolvePlatform(t *testing.T) {
 	for _, c := range cases {
 		t.Setenv("WORKER_OS", c.workerOS)
 		t.Setenv("WAYLAND_DISPLAY", c.wayland)
-		d := Resolve(nil)
+		d := Resolve()
 		if got := d.Platform(); got != c.want {
 			t.Errorf("WORKER_OS=%q WAYLAND=%q: platform=%q want %q", c.workerOS, c.wayland, got, c.want)
 		}

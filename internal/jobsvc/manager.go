@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -126,7 +127,8 @@ type ExecOpts struct {
 	Command string
 	// Workdir is relative to the workspace root ("" = the root).
 	Workdir string
-	// Lang is the interpreter id ("" = the runner's default).
+	// Lang is the interpreter id. REQUIRED: there is no default, because a command
+	// means different things in different languages (see script.ErrNoLanguage).
 	Lang string
 	// Mode is a declared mode for that language ("" = the interpreter default).
 	Mode string
@@ -145,6 +147,12 @@ func (m *Manager) ExecuteNS(ctx context.Context, opts ExecOpts) (string, error) 
 	ns, command, workdir := opts.Namespace, opts.Command, opts.Workdir
 	if ns == "" {
 		ns = NamespaceUser
+	}
+	// Checked here as well as at the RPC edge: this is the last place before a job
+	// is created, and a language-less job would run as whatever the runner guesses.
+	// Both layers check because jobsvc is also used internally (computer, tests).
+	if strings.TrimSpace(opts.Lang) == "" {
+		return "", fmt.Errorf("lang required: %w", script.ErrNoLanguage)
 	}
 	id := newID()
 	// An os.Pipe, not an io.Pipe: os/exec passes an *os.File straight to the

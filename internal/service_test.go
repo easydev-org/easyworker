@@ -47,8 +47,18 @@ func TestInfo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Shell != "easyscript(bash)" {
-		t.Errorf("shell = %q", info.Shell)
+	// The engine name, with no language: there is no default language to name.
+	// What a client should read instead is Interpreters, asserted below.
+	if info.Shell != "easyscript" {
+		t.Errorf("shell = %q, want %q", info.Shell, "easyscript")
+	}
+	for _, l := range info.Interpreters {
+		if l.Id == "" || l.Name == "" {
+			t.Errorf("incomplete interpreter entry: %+v", l)
+		}
+		if l.Path == "" {
+			t.Errorf("%s: no path", l.Id)
+		}
 	}
 	if info.Workspace == "" {
 		t.Error("workspace empty")
@@ -63,7 +73,9 @@ func TestExecuteWatchLifecycle(t *testing.T) {
 	defer done()
 
 	ctx := context.Background()
+	langID := shellLang(t, c)
 	exec, err := c.Execute(ctx, &workerv1.ExecuteRequest{
+		Lang:    langID,
 		Command: "echo first && sleep 0.3 && echo second && echo warn >&2",
 	})
 	if err != nil {
@@ -174,7 +186,7 @@ func TestJobWaitHonorsLongTimeouts(t *testing.T) {
 	defer done()
 	ctx := context.Background()
 
-	exec, err := c.Execute(ctx, &workerv1.ExecuteRequest{Command: "sleep 1"})
+	exec, err := c.Execute(ctx, &workerv1.ExecuteRequest{Lang: shellLang(t, c), Command: "sleep 1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +249,7 @@ func TestStdinAndKill(t *testing.T) {
 	defer done()
 	ctx := context.Background()
 
-	exec, err := c.Execute(ctx, &workerv1.ExecuteRequest{Command: "cat"})
+	exec, err := c.Execute(ctx, &workerv1.ExecuteRequest{Lang: shellLang(t, c), Command: "cat"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +266,7 @@ func TestStdinAndKill(t *testing.T) {
 	}
 	t.Fatal("cat did not complete")
 killed:
-	exec2, err := c.Execute(ctx, &workerv1.ExecuteRequest{Command: "sleep 60"})
+	exec2, err := c.Execute(ctx, &workerv1.ExecuteRequest{Lang: shellLang(t, c), Command: "sleep 60"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,4 +280,27 @@ killed:
 	if wait.State != "killed" {
 		t.Errorf("state = %s want killed", wait.State)
 	}
+}
+
+// shellLang asks the server which interpreters it has and returns a SHELL one.
+//
+// Tests must name a language now — there is no default — and these particular
+// tests are written against shell syntax, so the honest thing is to use a shell
+// and skip when the host has none, rather than pretending one language's test
+// program works in another.
+func shellLang(t *testing.T, c workerv1connect.WorkerServiceClient) string {
+	t.Helper()
+	info, err := c.Info(context.Background(), &workerv1.InfoRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"bash", "zsh", "sh"} {
+		for _, l := range info.Interpreters {
+			if l.Id == want {
+				return l.Id
+			}
+		}
+	}
+	t.Skip("no shell interpreter on this host")
+	return ""
 }

@@ -11,6 +11,27 @@ import (
 	"github.com/easydev-org/easyworker/internal/script"
 )
 
+// shellLang returns a shell interpreter id for this host.
+//
+// ExecOpts.Lang is required now — there is no default — and every test in this
+// file is written in shell syntax, so the honest thing is to name a shell and skip
+// when the host has none.
+func shellLang(t *testing.T) string {
+	t.Helper()
+	// Through the script package: easyscript's internal/lang is not importable
+	// from another module, and Runner.Languages is the supported way to ask.
+	r := script.New(t.TempDir())
+	for _, id := range []string{"bash", "zsh", "sh"} {
+		for _, l := range r.Languages(context.Background()) {
+			if l.ID == id {
+				return id
+			}
+		}
+	}
+	t.Skip("no shell interpreter on this host")
+	return ""
+}
+
 func newTestManager(t *testing.T) (*Manager, string) {
 	t.Helper()
 	ws := t.TempDir()
@@ -34,7 +55,7 @@ func TestExecuteLifecycle(t *testing.T) {
 	// deterministic (published immediately, will be in the replay) and the SECOND
 	// unambiguously live (published seconds later, long after Subscribe).
 	id, err := m.Execute(context.Background(), ExecOpts{
-		Command: "echo hi && sleep 3 && echo bye", Workdir: "", TimeoutMs: 0,
+		Lang: shellLang(t), Command: "echo hi && sleep 3 && echo bye", Workdir: "", TimeoutMs: 0,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -88,7 +109,7 @@ func TestExecuteLifecycle(t *testing.T) {
 func TestExecuteNoTrailingNewline(t *testing.T) {
 	m, _ := newTestManager(t)
 
-	id, _ := m.Execute(context.Background(), ExecOpts{Command: "printf no-newline-here", Workdir: "", TimeoutMs: 0})
+	id, _ := m.Execute(context.Background(), ExecOpts{Lang: shellLang(t), Command: "printf no-newline-here", Workdir: "", TimeoutMs: 0})
 	job, _ := m.Get(id)
 	<-job.Done()
 
@@ -101,7 +122,7 @@ func TestExecuteNoTrailingNewline(t *testing.T) {
 func TestStreamFilter(t *testing.T) {
 	m, _ := newTestManager(t)
 
-	id, _ := m.Execute(context.Background(), ExecOpts{Command: "echo to-out && echo to-err >&2", Workdir: "", TimeoutMs: 0})
+	id, _ := m.Execute(context.Background(), ExecOpts{Lang: shellLang(t), Command: "echo to-out && echo to-err >&2", Workdir: "", TimeoutMs: 0})
 	job, _ := m.Get(id)
 	<-job.Done()
 
@@ -128,7 +149,7 @@ func TestPersistenceAcrossReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	m1 := NewManager(script.New(ws), store1, 1000, 200)
-	id, _ := m1.Execute(context.Background(), ExecOpts{Command: "echo persist-me", Workdir: "", TimeoutMs: 0})
+	id, _ := m1.Execute(context.Background(), ExecOpts{Lang: shellLang(t), Command: "echo persist-me", Workdir: "", TimeoutMs: 0})
 	job, _ := m1.Get(id)
 	<-job.Done()
 
@@ -182,7 +203,7 @@ func TestBootRecovery(t *testing.T) {
 func TestRetention(t *testing.T) {
 	m, dbPath := newTestManager(t)
 
-	id, _ := m.Execute(context.Background(), ExecOpts{Command: "echo old-job", Workdir: "", TimeoutMs: 0})
+	id, _ := m.Execute(context.Background(), ExecOpts{Lang: shellLang(t), Command: "echo old-job", Workdir: "", TimeoutMs: 0})
 	job, _ := m.Get(id)
 	<-job.Done()
 	time.Sleep(400 * time.Millisecond)
@@ -206,7 +227,7 @@ func TestKillAndStdin(t *testing.T) {
 	m, _ := newTestManager(t)
 
 	// stdin round-trip
-	id, _ := m.Execute(context.Background(), ExecOpts{Command: "cat", Workdir: "", TimeoutMs: 0})
+	id, _ := m.Execute(context.Background(), ExecOpts{Lang: shellLang(t), Command: "cat", Workdir: "", TimeoutMs: 0})
 	job, _ := m.Get(id)
 	if err := job.Stdin([]byte("hello\n"), true); err != nil {
 		t.Fatal(err)
@@ -222,7 +243,7 @@ func TestKillAndStdin(t *testing.T) {
 	}
 
 	// kill a sleeping job
-	id2, _ := m.Execute(context.Background(), ExecOpts{Command: "sleep 60", Workdir: "", TimeoutMs: 0})
+	id2, _ := m.Execute(context.Background(), ExecOpts{Lang: shellLang(t), Command: "sleep 60", Workdir: "", TimeoutMs: 0})
 	job2, _ := m.Get(id2)
 	time.Sleep(100 * time.Millisecond)
 	job2.Kill()
@@ -239,7 +260,7 @@ func TestKillAndStdin(t *testing.T) {
 func TestExecuteTimeoutKills(t *testing.T) {
 	m, _ := newTestManager(t)
 	// 200ms deadline on a 60s sleep: the worker must kill it.
-	id, err := m.Execute(context.Background(), ExecOpts{Command: "sleep 60", Workdir: "", TimeoutMs: 200})
+	id, err := m.Execute(context.Background(), ExecOpts{Lang: shellLang(t), Command: "sleep 60", Workdir: "", TimeoutMs: 200})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +278,7 @@ func TestExecuteTimeoutKills(t *testing.T) {
 func TestOutputLinesSQLPagination(t *testing.T) {
 	m, _ := newTestManager(t)
 	// 250 lines: enough to exercise page offsets against the store.
-	id, _ := m.Execute(context.Background(), ExecOpts{Command: "for i in $(seq 1 250); do echo line-$i; done", Workdir: "", TimeoutMs: 0})
+	id, _ := m.Execute(context.Background(), ExecOpts{Lang: shellLang(t), Command: "for i in $(seq 1 250); do echo line-$i; done", Workdir: "", TimeoutMs: 0})
 	job, _ := m.Get(id)
 	select {
 	case <-job.Done():
@@ -299,7 +320,7 @@ func TestOutputLinesSQLPagination(t *testing.T) {
 // nobody would ever close, hanging a WatchJob range forever.
 func TestSubscribeAfterFinishNeverHangs(t *testing.T) {
 	m, _ := newTestManager(t)
-	id, err := m.Execute(context.Background(), ExecOpts{Command: "echo done", Workdir: "", TimeoutMs: 0})
+	id, err := m.Execute(context.Background(), ExecOpts{Lang: shellLang(t), Command: "echo done", Workdir: "", TimeoutMs: 0})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +362,7 @@ func TestRecordDoesNotExecuteAndNamespaces(t *testing.T) {
 	}
 
 	// A user job and a computer record must be separable by namespace.
-	id, err := m.Execute(context.Background(), ExecOpts{Command: "echo hi", Workdir: "", TimeoutMs: 0})
+	id, err := m.Execute(context.Background(), ExecOpts{Lang: shellLang(t), Command: "echo hi", Workdir: "", TimeoutMs: 0})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -381,6 +402,7 @@ func TestRecordDoesNotExecuteAndNamespaces(t *testing.T) {
 func TestOutputOrderAndStreamLabels(t *testing.T) {
 	m, _ := newTestManager(t)
 	id, err := m.Execute(context.Background(), ExecOpts{
+		Lang:    shellLang(t),
 		Command: "echo o1; echo e1 >&2; echo o2; echo e2 >&2; echo o3",
 	})
 	if err != nil {

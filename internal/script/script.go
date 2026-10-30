@@ -21,46 +21,35 @@ package script
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/easydev-org/easyscript/pkg/engine"
 )
 
-// defaultCandidates is the order in which the worker picks its DEFAULT language,
-// per platform. The first one that the engine can actually run wins.
+// ErrNoLanguage means the caller did not say what language the command is written
+// in. There is deliberately NO default.
 //
-// A single constant is wrong now that languages are per-platform: bash is the
-// obvious default on Linux and macOS, but it is NOT guaranteed on Windows (it
-// arrives only with Git for Windows or WSL), while PowerShell ships with the OS.
-// Picking bash unconditionally would make every command on a plain Windows image
-// fail to even start, and the error would look like "the daemon is broken".
-var defaultCandidates = map[string][]string{
-	"windows": {"powershell7", "windowspowershell", "nu", "bash", "sh", "python", "node"},
-	// macOS gets zsh first: it is the OS default shell, and the bash that ships
-	// there is 3.2 from 2007.
-	"darwin": {"zsh", "bash", "sh", "nu", "python", "node"},
-	"linux":  {"bash", "sh", "nu", "python", "node"},
-}
-
-// fallbackLanguage is used only if NOTHING in defaultCandidates is available,
-// which means the image has no interpreter at all. Naming one anyway keeps the
-// error message specific ("bash is not installed") instead of vague.
-const fallbackLanguage = "bash"
+// A default language cannot mean the same thing on two platforms, and that is not
+// a detail — it is the whole problem. The same string "echo hello && ls" is valid
+// bash, is a syntax error in Windows PowerShell 5.1 (no &&), and means something
+// different again in PowerShell 7 (ls is an alias for Get-ChildItem). A worker
+// that silently picks one would run a caller's command as a different language
+// from the one it was written in, and report success.
+//
+// So the language is required. Callers that genuinely run on several platforms can
+// read Info.interpreters and choose; the choice is theirs to make explicitly.
+var ErrNoLanguage = errors.New("no language given")
 
 // Runner executes commands. It is safe for concurrent use.
 type Runner struct {
 	root string
 	eng  *engine.Engine
-
-	mu   sync.RWMutex
-	lang string
 }
 
 // New builds a Runner whose relative paths resolve against root.
@@ -70,28 +59,10 @@ type Runner struct {
 // itself resolves tools against, including anything an on-demand toolchain
 // install added to the process PATH.
 func New(root string) *Runner {
-	eng := engine.New(engine.Options{Dir: root})
 	return &Runner{
 		root: root,
-		eng:  eng,
-		lang: pickDefaultLanguage(eng),
+		eng:  engine.New(engine.Options{Dir: root}),
 	}
-}
-
-// pickDefaultLanguage returns the first candidate this host can actually run.
-//
-// It probes ONCE at construction: the answer is a property of the image, not of
-// any request, and a caller who explicitly names a language is unaffected. When
-// nothing is available (an image with no interpreter at all) it still returns a
-// name, so the failure a caller sees says which one is missing.
-func pickDefaultLanguage(eng *engine.Engine) string {
-	sup := eng.Supported(context.Background())
-	for _, id := range defaultCandidates[runtime.GOOS] {
-		if _, ok := sup[id]; ok {
-			return id
-		}
-	}
-	return fallbackLanguage
 }
 
 // Root is the directory relative paths resolve against.
@@ -100,30 +71,13 @@ func (r *Runner) Root() string { return r.root }
 // Engine exposes the engine, so callers can ask what this host can run.
 func (r *Runner) Engine() *engine.Engine { return r.eng }
 
-// Language reports the default language for future runs.
-func (r *Runner) Language() string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.lang
-}
-
-// SetLanguage changes the default. The id is validated against the engine's probe
-// NOW, so a typo fails at configuration time instead of on the first job.
-func (r *Runner) SetLanguage(id string) error {
-	if _, err := r.eng.Resolve(context.Background(), id); err != nil {
-		return err
-	}
-	r.mu.Lock()
-	r.lang = id
-	r.mu.Unlock()
-	return nil
-}
-
 // Spec describes one run.
 type Spec struct {
 	// Code is the program text.
 	Code string
-	// Lang is the interpreter id ("" = the Runner's default).
+	// Lang is the interpreter id, and it is REQUIRED. There is no default: a
+	// command means different things in different languages (see ErrNoLanguage),
+	// and guessing would run it as the wrong one.
 	Lang string
 	// Mode is a mode that language declares ("" = the interpreter default). A
 	// mode the language does not declare is an error, never a silent default.
@@ -152,18 +106,27 @@ type Result struct {
 // start". An error means the run could not happen at all (unknown language, bad
 // mode, cancelled).
 func (r *Runner) Run(ctx context.Context, spec Spec) (Result, error) {
-	lang := spec.Lang
-	if lang == "" {
-		lang = r.Language()
+	if strings.TrimSpace(spec.Lang) == "" {
+		// Refuse rather than guess. The error names what IS available so a caller
+		// can pick from real options instead of guessing at ids.
+		ids := make([]string, 0, 4)
+		for _, l := range r.Languages(ctx) {
+			ids = append(ids, l.ID)
+		}
+		if len(ids) == 0 {
+			return Result{}, fmt.Errorf("%w: this host has no interpreter installed", ErrNoLanguage)
+		}
+		return Result{}, fmt.Errorf("%w: state it explicitly (this host has: %s)",
+			ErrNoLanguage, strings.Join(ids, ", "))
 	}
 	code, err := r.eng.Run(ctx, engine.Spec{
-		Lang:  lang,
+		Lang:  spec.Lang,
 		Code:  spec.Code,
 		Mode:  spec.Mode,
 		Dir:   r.resolve(spec.Workdir),
 		Stdin: spec.Stdin,
 	}, spec.Stdout, spec.Stderr)
-	return Result{ExitCode: code, Lang: lang}, err
+	return Result{ExitCode: code, Lang: spec.Lang}, err
 }
 
 // LanguageInfo is one runnable interpreter.

@@ -52,7 +52,7 @@ func TestExecuteEnsuresDeclaredToolchain(t *testing.T) {
 	c := workerv1connect.NewWorkerServiceClient(connect.NewClient(connecthttp.NewTransport(http.DefaultClient, srv.URL, connecthttp.WithReadMaxBytes(0))))
 
 	t.Setenv("WORKSPACE_TOOLCHAINS", "go=1.27.1")
-	exec, err := c.Execute(context.Background(), &workerv1.ExecuteRequest{Command: "mytool"})
+	exec, err := c.Execute(context.Background(), &workerv1.ExecuteRequest{Lang: shellLang(t, c), Command: "mytool"})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestExecuteToolchainFailureFailsJob(t *testing.T) {
 	c := workerv1connect.NewWorkerServiceClient(connect.NewClient(connecthttp.NewTransport(http.DefaultClient, srv.URL, connecthttp.WithReadMaxBytes(0))))
 
 	t.Setenv("WORKSPACE_TOOLCHAINS", "go=1.27.1")
-	if _, err := c.Execute(context.Background(), &workerv1.ExecuteRequest{Command: "true"}); err == nil {
+	if _, err := c.Execute(context.Background(), &workerv1.ExecuteRequest{Lang: shellLang(t, c), Command: "true"}); err == nil {
 		t.Fatal("expected Execute to fail when the toolchain cannot be installed")
 	}
 }

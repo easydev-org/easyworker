@@ -131,7 +131,7 @@ func main() {
 
 	// ComputerService: the worker-native GUI-automation surface (bearer-gated
 	// like WorkerService). The driver is resolved from this worker's platform.
-	comp := internal.NewComputerService(computer.Resolve(svc.Runner()), jobs)
+	comp := internal.NewComputerService(computer.Resolve(), jobs)
 	srv2 := connect.NewServer(auth.NewInterceptor(gate))
 	workerv1connect.RegisterComputerServiceHandler(srv2, comp)
 	connecthttp.Mount(mux, srv2, connecthttp.WithReadMaxBytes(0))

@@ -441,9 +441,14 @@ type ExecuteRequest struct {
 	// Job namespace: "user" (default) for caller commands, "computer" for the
 	// worker's own GUI-automation operations. Lets a UI group them.
 	Namespace string `protobuf:"bytes,5,opt,name=namespace,proto3" json:"namespace,omitempty"`
-	// Language the command is written in ("" = the worker's default, bash). Must
-	// be one of Info.interpreter ids; an unknown or unusable one is rejected at
-	// Execute time rather than failing the job afterwards.
+	// Language the command is written in. REQUIRED — there is no default.
+	//
+	// A default cannot be safe: "echo hi && ls" is bash, is a syntax error in
+	// Windows PowerShell 5.1, and means something else in PowerShell 7 (ls is an
+	// alias). A worker that guessed would run the command as a different language
+	// from the one it was written in and report success. So an empty value is
+	// rejected with InvalidArgument naming the ids this host actually has; read
+	// Info.interpreters to pick one.
 	Lang string `protobuf:"bytes,6,opt,name=lang,proto3" json:"lang,omitempty"`
 	// Named mode for that language ("" = the interpreter default). Sending a mode
 	// a language does not declare is an error, never a silent fallback.

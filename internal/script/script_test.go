@@ -2,70 +2,78 @@ package script
 
 import (
 	"context"
-	"runtime"
+	"errors"
 	"testing"
 )
 
-// TestDefaultLanguageIsRunnable: the worker's default must be a language this
-// host can ACTUALLY run. A hardcoded "bash" was wrong on Windows, where bash only
-// exists if Git for Windows or WSL happens to be installed, while PowerShell ships
-// with the OS — every command on a plain Windows image would have failed to start.
-func TestDefaultLanguageIsRunnable(t *testing.T) {
+// TestNoLanguageIsRejected is the contract this package now has: a run with no
+// language FAILS. It used to fall back to a "default", which could not be right on
+// two platforms at once (the same text is valid bash and invalid Windows
+// PowerShell 5.1), so a command could silently run as a different language from
+// the one it was written in and still exit 0.
+func TestNoLanguageIsRejected(t *testing.T) {
 	r := New(t.TempDir())
-	def := r.Language()
-	if def == "" {
-		t.Fatal("no default language")
+	_, err := r.Run(context.Background(), Spec{Code: "echo hi"})
+	if err == nil {
+		t.Fatal("a run with no language must fail")
 	}
-	sup := r.Engine().Supported(context.Background())
-	if len(sup) == 0 {
-		t.Skipf("no interpreter on this host; default is %q", def)
+	if !errors.Is(err, ErrNoLanguage) {
+		t.Fatalf("err = %v, want ErrNoLanguage", err)
 	}
-	if _, ok := sup[def]; !ok {
-		ids := make([]string, 0, len(sup))
-		for id := range sup {
-			ids = append(ids, id)
-		}
-		t.Fatalf("default %q is not runnable here (available: %v)", def, ids)
+	// A whitespace-only language is the same mistake.
+	if _, err := r.Run(context.Background(), Spec{Code: "echo hi", Lang: "   "}); !errors.Is(err, ErrNoLanguage) {
+		t.Fatalf("blank lang: err = %v, want ErrNoLanguage", err)
 	}
 }
 
-// TestDefaultRunsAProgram is the end-to-end version: use the default and check
-// that a command actually produces output. A default that probes as available but
-// cannot run a program is worse than none.
-func TestDefaultRunsAProgram(t *testing.T) {
+// TestNoLanguageErrorNamesTheOptions: the error must be actionable. Telling a
+// caller "lang required" while withholding what IS installed makes them guess at
+// ids.
+func TestNoLanguageErrorNamesTheOptions(t *testing.T) {
 	r := New(t.TempDir())
-	if len(r.Engine().Supported(context.Background())) == 0 {
-		t.Skip("no interpreter on this host")
+	langs := r.Languages(context.Background())
+	_, err := r.Run(context.Background(), Spec{Code: "echo hi"})
+	if err == nil {
+		t.Fatal("want an error")
 	}
-	code, want := defaultProgram(r.Language())
-	if code == "" {
-		t.Skipf("no sample program for %q", r.Language())
+	if len(langs) == 0 {
+		if !contains(err.Error(), "no interpreter") {
+			t.Fatalf("on a host with nothing installed the error should say so: %v", err)
+		}
+		return
 	}
-	var out capture
-	res, err := r.Run(context.Background(), Spec{Code: code, Stdout: &out})
-	if err != nil {
-		t.Fatalf("%s: %v", r.Language(), err)
-	}
-	if res.ExitCode != 0 {
-		t.Fatalf("%s exited %d: %q", r.Language(), res.ExitCode, out.s)
-	}
-	if !contains(out.s, want) {
-		t.Fatalf("%s output = %q, want %q", r.Language(), out.s, want)
+	for _, l := range langs {
+		if !contains(err.Error(), l.ID) {
+			t.Fatalf("error does not mention available id %q: %v", l.ID, err)
+		}
 	}
 }
 
-// TestPlatformCandidatesCoverEveryPlatform guards the table itself: a GOOS the
-// worker might run on must have candidates, or the lookup silently returns only
-// the fallback.
-func TestPlatformCandidatesCoverEveryPlatform(t *testing.T) {
-	for _, goos := range []string{"linux", "darwin", "windows"} {
-		if len(defaultCandidates[goos]) == 0 {
-			t.Fatalf("no default candidates for %s", goos)
+// TestExplicitLanguageRuns: naming a language works, and the result reports it.
+func TestExplicitLanguageRuns(t *testing.T) {
+	r := New(t.TempDir())
+	for _, l := range r.Languages(context.Background()) {
+		code, want := defaultProgram(l.ID)
+		if code == "" {
+			continue
 		}
+		var out capture
+		res, err := r.Run(context.Background(), Spec{Lang: l.ID, Code: code, Stdout: &out})
+		if err != nil {
+			t.Fatalf("%s: %v", l.ID, err)
+		}
+		if res.ExitCode != 0 {
+			t.Fatalf("%s exited %d: %q", l.ID, res.ExitCode, out.s)
+		}
+		if res.Lang != l.ID {
+			t.Fatalf("%s: Result.Lang = %q", l.ID, res.Lang)
+		}
+		if !contains(out.s, want) {
+			t.Fatalf("%s output = %q, want %q", l.ID, out.s, want)
+		}
+		return // one interpreter is enough to prove the path
 	}
-	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" && runtime.GOOS != "windows" {
-		t.Logf("note: no candidate list for %s; the fallback will be used", runtime.GOOS)
-	}
+	t.Skip("no interpreter with a sample program on this host")
 }
 
 type capture struct{ s string }

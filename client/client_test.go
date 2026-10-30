@@ -97,7 +97,7 @@ func TestStreamingCarriesBearer(t *testing.T) {
 
 	// Start a short job, then consume the server stream — this exercises
 	// WrapStreamingClient; an unauthenticated stream would fail immediately.
-	res, err := cli.Execute(ctx, &workerv1.ExecuteRequest{Command: "echo streaming-ok"})
+	res, err := cli.Execute(ctx, &workerv1.ExecuteRequest{Lang: "bash", Command: "echo streaming-ok"})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}

@@ -6,13 +6,9 @@ package computer
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"runtime"
 	"strings"
-
-	"github.com/easydev-org/easyworker/internal/a11y/native"
-	"github.com/easydev-org/easyworker/internal/script"
 )
 
 // App is one running GUI application (Android: the foreground package).
@@ -52,14 +48,13 @@ func envOS() string {
 }
 
 // Resolve picks the driver for this worker's platform. It never fails: an
-// unsupported platform resolves to the X11/AT-SPI driver, whose methods return
-// a clear error if the tool is missing.
-func Resolve(r *script.Runner) Driver {
-	// native-a11y (abc-agent/worker-native): when the daemon is enabled, it owns
-	// the a11y tree / input / capture, so drive it over HTTP.
-	if native.Enabled() {
-		return newNative(nativePlatform(), nativeDisplay())
-	}
+// unsupported platform still resolves to the native driver, whose methods return
+// a clear error if the daemon is unreachable.
+//
+// It takes no runner: every GPU/a11y operation goes through the native daemon now,
+// so the platform is the only input. (It used to take a *script.Runner that it
+// never read.)
+func Resolve() Driver {
 	return newNative(nativePlatform(), nativeDisplay())
 }
 
@@ -97,45 +92,9 @@ func nativeDisplay() string {
 	}
 }
 
-// ---- shared command helpers (used by every driver) ----
-
-// cmdResult is a finished command's outcome, including what it printed. script.
-// Result deliberately carries only the exit code and the language: output goes to
-// the writers you pass. GUI helpers want the text, so they collect it here.
-type cmdResult struct {
-	ExitCode int
-	Stdout   string
-	Stderr   string
-}
-
-// run interprets one command through the engine and captures its output (not
-// streamed): GUI ops are short and the caller needs the text.
-func run(ctx context.Context, r *script.Runner, command string) (cmdResult, error) {
-	var out, errb strings.Builder
-	res, err := r.Run(ctx, script.Spec{Code: command, Stdout: &out, Stderr: &errb})
-	return cmdResult{ExitCode: res.ExitCode, Stdout: out.String(), Stderr: errb.String()}, err
-}
-
-// runChecked runs a command and returns its stdout, erroring on a non-zero exit
-// (with stderr in the message).
-func runChecked(ctx context.Context, r *script.Runner, command string) (string, error) {
-	res, err := run(ctx, r, command)
-	if err != nil {
-		return "", err
-	}
-	if res.ExitCode != 0 {
-		return res.Stdout, fmt.Errorf("command failed (exit %d): %s", res.ExitCode, strings.TrimSpace(res.Stderr))
-	}
-	return res.Stdout, nil
-}
-
-// hasTool reports whether a binary is on PATH.
-func hasTool(ctx context.Context, r *script.Runner, name string) bool {
-	res, err := run(ctx, r, "command -v "+shq(name))
-	return err == nil && res.ExitCode == 0 && strings.TrimSpace(res.Stdout) != ""
-}
-
-// shq single-quotes a string for the builtin shell.
-func shq(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
+// NOTE: the shell-command helpers (run/runChecked/hasTool/shq) lived here. They
+// were how this package probed for tools by running `command -v` in the shell —
+// but no driver calls them any more: every a11y action goes through the native
+// daemon, and "is this tool present" is answered by the engine's interpreter probe
+// (script.Runner.Languages) rather than by shelling out. They were dead code that
+// would have broken anyway once lang became required, so they are gone.

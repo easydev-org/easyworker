@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"connectrpc.com/connect/v2"
@@ -54,11 +55,12 @@ func (s *WorkerService) Info(ctx context.Context, req *workerv1.InfoRequest) (*w
 	return &workerv1.InfoResponse{
 		Os:   goos(),
 		Arch: goarch(),
-		// The engine is easyscript: a program TEXT goes to an external
-		// interpreter (bash by default, python/node/... available), never to a
-		// host shell and never to an in-process interpreter. Reporting the
-		// language tells the model what it is writing.
-		Shell: "easyscript(" + s.shell.Language() + ")",
+		// The engine is easyscript: a program TEXT goes to an external interpreter,
+		// never to a host shell and never to an in-process one. No language is
+		// named here because there is no default one — a caller states it per job
+		// (see ExecuteRequest.lang). Which interpreters exist is
+		// Info.interpreters, which is the list a client should actually read.
+		Shell: "easyscript",
 		// Slash-form so a Windows worker reports C:/... consistently to the UI.
 		Workspace:    filepath.ToSlash(s.files.Root()),
 		BootId:       s.bootID,
@@ -98,6 +100,15 @@ func (s *WorkerService) interpreters(ctx context.Context) []*workerv1.Interprete
 func (s *WorkerService) Execute(ctx context.Context, req *workerv1.ExecuteRequest) (*workerv1.ExecuteResponse, error) {
 	if req.Command == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, "command required")
+	}
+	// lang is REQUIRED. See the proto comment: there is no safe default, because a
+	// command means different things in different languages. Rejecting here (rather
+	// than guessing) is what keeps "it ran" from meaning "it ran as the wrong
+	// language and still exited 0".
+	if strings.TrimSpace(req.GetLang()) == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			"lang required: name the interpreter the command is written in "+
+				"(see Info.interpreters for this host's ids)")
 	}
 	// On-demand toolchains: install whatever the workspace declared BEFORE the
 	// job runs. A failure fails the job loudly — never a silent fallback to the
