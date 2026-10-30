@@ -26,12 +26,15 @@ func newTestManager(t *testing.T) (*Manager, string) {
 func TestExecuteLifecycle(t *testing.T) {
 	m, _ := newTestManager(t)
 
-	// The FIRST line must arrive AFTER we subscribe, or "live" is untestable: the
-	// engine forks bash directly, so `echo hi` can be published before Execute's
-	// caller even reaches Subscribe. (With the old in-process engine the startup
-	// cost hid that race.) The trailing lines are asserted via Result below.
+	// "Live" only means something if a line is published AFTER we subscribe. The
+	// engine forks a real process, so anything short can finish before Execute's
+	// caller even reaches Subscribe — and on a loaded CI runner even a 0.3s sleep
+	// can elapse in the gap between Execute returning and Subscribe being called.
+	// So: emit a line, then a long sleep, then the rest. That makes the FIRST line
+	// deterministic (published immediately, will be in the replay) and the SECOND
+	// unambiguously live (published seconds later, long after Subscribe).
 	id, err := m.Execute(context.Background(), ExecOpts{
-		Command: "sleep 0.3 && echo hi && echo bye", Workdir: "", TimeoutMs: 0,
+		Command: "echo hi && sleep 3 && echo bye", Workdir: "", TimeoutMs: 0,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -42,20 +45,29 @@ func TestExecuteLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// subscribe before completion: live gets the output
-	_, live := job.Subscribe()
-	select {
-	case line := <-live:
-		if line == "" {
-			t.Error("empty live line")
+	// One subscription. Subscribe replays history and then delivers what follows,
+	// so a single channel carries everything: "hi" (printed immediately, from the
+	// replay) then "bye" (printed seconds later, live). Subscribing once means no
+	// leaked channels and one clear ordering to assert.
+	replay, live := job.Subscribe()
+	var got []string
+	got = append(got, replay...)
+	deadline := time.After(20 * time.Second)
+	for len(got) < 2 {
+		select {
+		case line := <-live:
+			got = append(got, line)
+		case <-deadline:
+			t.Fatalf("got %v, want [hi bye] (live channel stalled)", got)
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("no live output within 5s")
+	}
+	if got[0] != "hi" || got[1] != "bye" {
+		t.Fatalf("got %v, want [hi bye]", got)
 	}
 
 	select {
 	case <-job.Done():
-	case <-time.After(5 * time.Second):
+	case <-time.After(15 * time.Second):
 		t.Fatal("job did not finish")
 	}
 
