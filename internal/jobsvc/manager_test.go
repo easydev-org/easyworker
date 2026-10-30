@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -353,15 +354,22 @@ func TestRecordDoesNotExecuteAndNamespaces(t *testing.T) {
 	}
 }
 
-// TestOutputOrderAcrossStreams pins the bug that took CI down: stdout and stderr
-// are fed by two goroutines, so any counter inside a stream buffer is a race, not
-// an order. A command with a deliberate gap between two stdout lines and a stderr
-// line after them must come out in the order it PRINTED, not the order the two
-// goroutines happened to reach a lock.
-func TestOutputOrderAcrossStreams(t *testing.T) {
+// TestOutputOrderAndStreamLabels pins what is actually guaranteed after merging
+// an external interpreter's two fds into the worker's line history:
+//
+//  1. each stream's own order is exact (history for stream=stderr is e1,e2 in
+//     that order, likewise stdout);
+//  2. the stream label survives all the way to storage, which is what
+//     JobOutput(stream: "stderr") filters on.
+//
+// The interleaving BETWEEN the streams is deliberately not asserted. It cannot be
+// guaranteed: the engine runs a child process whose stdout and stderr are two
+// separately buffered fds. (The engine's own TestStreamOrderAndLabels documents
+// the same boundary.)
+func TestOutputOrderAndStreamLabels(t *testing.T) {
 	m, _ := newTestManager(t)
 	id, err := m.Execute(context.Background(), ExecOpts{
-		Command: "echo first && sleep 0.15 && echo second && echo warn >&2",
+		Command: "echo o1; echo e1 >&2; echo o2; echo e2 >&2; echo o3",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -372,17 +380,26 @@ func TestOutputOrderAcrossStreams(t *testing.T) {
 	}
 	<-job.Done()
 
-	lines, total, _, _, _, err := m.OutputLines(id, -1, 0, 0)
+	all, total, _, _, _, err := m.OutputLines(id, -1, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"first", "second", "warn"}
-	if total != int32(len(want)) || len(lines) != len(want) {
-		t.Fatalf("total=%d lines=%v, want %v", total, lines, want)
+	if total != 5 || len(all) != 5 {
+		t.Fatalf("all history total=%d lines=%v, want 5", total, all)
 	}
-	for i := range want {
-		if lines[i] != want[i] {
-			t.Fatalf("line %d = %q, want %q (all: %v)", i, lines[i], want[i], lines)
-		}
+
+	out, outTotal, _, _, _, err := m.OutputLines(id, StreamStdout, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outTotal != 3 || strings.Join(out, ",") != "o1,o2,o3" {
+		t.Fatalf("stdout history = %v (total %d), want [o1 o2 o3]", out, outTotal)
+	}
+	errs, errTotal, _, _, _, err := m.OutputLines(id, StreamStderr, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if errTotal != 2 || strings.Join(errs, ",") != "e1,e2" {
+		t.Fatalf("stderr history = %v (total %d), want [e1 e2]", errs, errTotal)
 	}
 }

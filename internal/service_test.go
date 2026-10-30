@@ -101,9 +101,16 @@ func TestExecuteWatchLifecycle(t *testing.T) {
 	if doneEv == nil || doneEv.ExitCode != 0 {
 		t.Fatalf("done event = %+v", doneEv)
 	}
-	// live fanout carries BOTH stdout and stderr in sequence order
-	if len(lines) != 3 || lines[0] != "first" || lines[1] != "second" || lines[2] != "warn" {
-		t.Errorf("live lines = %v", lines)
+	// The live fanout carries BOTH streams. Their interleaving is not asserted:
+	// the engine runs an external interpreter, whose stdout and stderr are two
+	// independently buffered fds, so a later line on one stream can be read before
+	// an earlier line on the other. What IS guaranteed — and what the history
+	// assertions below check — is each stream's own order plus the stream label.
+	if len(lines) != 3 {
+		t.Errorf("live lines = %v, want 3", lines)
+	}
+	if !containsAll(lines, "first", "second", "warn") {
+		t.Errorf("live lines = %v, want first/second/warn in any interleaving", lines)
 	}
 
 	// wait on the finished job returns immediately
@@ -126,11 +133,36 @@ func TestExecuteWatchLifecycle(t *testing.T) {
 		t.Errorf("stderr filter = %v", stderrOnly.Lines)
 	}
 
-	// negative-start pagination
+	// Negative-start pagination: the LAST line written. Which line that is depends
+	// on how the two streams interleaved (not guaranteed), so assert the shape — one
+	// line, out of the three — and then that stderr's own last line is "warn".
 	last, _ := c.JobOutput(ctx, &workerv1.JobOutputRequest{JobId: jobID, Start: -1, End: 0})
-	if last.TotalLines != 3 || len(last.Lines) != 1 || last.Lines[0] != "warn" {
-		t.Errorf("tail-1 = %v", last.Lines)
+	if last.TotalLines != 3 || len(last.Lines) != 1 {
+		t.Errorf("tail-1 = %v (total %d), want exactly 1 of 3", last.Lines, last.TotalLines)
 	}
+	if len(last.Lines) == 1 {
+		if got := last.Lines[0]; got != "first" && got != "second" && got != "warn" {
+			t.Errorf("tail-1 = %q, want one of first/second/warn", got)
+		}
+	}
+	tailErr, _ := c.JobOutput(ctx, &workerv1.JobOutputRequest{JobId: jobID, Start: -1, End: 0, Stream: "stderr"})
+	if len(tailErr.Lines) != 1 || tailErr.Lines[0] != "warn" {
+		t.Errorf("stderr tail = %v, want [warn]", tailErr.Lines)
+	}
+}
+
+// containsAll reports whether every want appears in got.
+func containsAll(got []string, want ...string) bool {
+	set := make(map[string]bool, len(got))
+	for _, g := range got {
+		set[g] = true
+	}
+	for _, w := range want {
+		if !set[w] {
+			return false
+		}
+	}
+	return true
 }
 
 // Regression for the untyped-constant clamp: jobWaitMaxMs=60_000 compared
