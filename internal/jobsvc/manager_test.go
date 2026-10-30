@@ -25,7 +25,13 @@ func newTestManager(t *testing.T) (*Manager, string) {
 func TestExecuteLifecycle(t *testing.T) {
 	m, _ := newTestManager(t)
 
-	id, err := m.Execute(context.Background(), ExecOpts{Command: "echo hi && sleep 0.2 && echo bye", Workdir: "", TimeoutMs: 0})
+	// The FIRST line must arrive AFTER we subscribe, or "live" is untestable: the
+	// engine forks bash directly, so `echo hi` can be published before Execute's
+	// caller even reaches Subscribe. (With the old in-process engine the startup
+	// cost hid that race.) The trailing lines are asserted via Result below.
+	id, err := m.Execute(context.Background(), ExecOpts{
+		Command: "sleep 0.3 && echo hi && echo bye", Workdir: "", TimeoutMs: 0,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
