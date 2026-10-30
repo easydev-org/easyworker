@@ -174,15 +174,31 @@ func (m *Manager) ExecuteNS(ctx context.Context, opts ExecOpts) (string, error) 
 		stdinW:    w,
 		cancel:    cancel,
 	}
-	nextSeq := func() int64 { return job.seq.Add(1) }
-	job.Stdout = script.NewLineBuffer(m.memLines, nextSeq, func(rec script.LineRec) {
-		job.publishLine(rec.Line)                                   // live fanout (stdout only)
-		m.store.TryEnqueueLine(id, rec.Seq, StreamStdout, rec.Line) // persistence
-	})
-	job.Stderr = script.NewLineBuffer(m.memLines, nextSeq, func(rec script.LineRec) {
-		job.publishLine(rec.Line)                                   // live fanout (stderr)
-		m.store.TryEnqueueLine(id, rec.Seq, StreamStderr, rec.Line) // persistence
-	})
+	// ONE sequence source, assigned under the SAME lock as the live fanout.
+	//
+	// stdout and stderr arrive on two goroutines, each writing to its own
+	// LineBuffer. Giving each buffer its own seq source (the obvious reading of
+	// "nextSeq") meant the two raced: `echo first && sleep 1 && echo second &&
+	// echo warn >&2` came out as first/warn/second, because stderr won a seq the
+	// stdout line should have had. Assigning the seq inside the publish lock makes
+	// the number mean "the order this line was published", which is exactly what
+	// the replay sorts on and what persistence stores.
+	emit := func(stream int) func(script.LineRec) {
+		return func(rec script.LineRec) {
+			// A blank line is a real line ("echo" prints an empty line) and MUST be
+			// recorded; publishLine only skips FANNING OUT an empty string, because
+			// a subscriber cannot tell it apart from a dropped event.
+			seq := job.publishLine(rec.Line) // live fanout, ordered
+			m.store.TryEnqueueLine(id, seq, stream, rec.Line)
+		}
+	}
+	// The in-memory ring needs its own monotonically increasing number so
+	// memSuffix can slice it; it is NOT the job-global order (that comes from
+	// publishLine). One counter shared by both buffers keeps the two rings on the
+	// same scale, which is what memSuffix compares across streams.
+	var ringSeq atomic.Int64
+	job.Stdout = script.NewLineBuffer(m.memLines, func() int64 { return ringSeq.Add(1) }, emit(StreamStdout))
+	job.Stderr = script.NewLineBuffer(m.memLines, func() int64 { return ringSeq.Add(1) }, emit(StreamStderr))
 
 	m.mu.Lock()
 	m.jobs[id] = job
@@ -601,18 +617,24 @@ func (j *Job) Subscribe() (replay []string, ch chan string) {
 	return recsToLines(recs), ch
 }
 
-func (j *Job) publishLine(line string) {
-	if line == "" {
-		return
-	}
+// publishLine assigns the job-global sequence number and fans the line out to
+// live subscribers, both under one lock. Returning the seq lets the caller
+// persist it with the same number the replay will sort on — two separate
+// allocators here produced lines that disagreed with their own history.
+func (j *Job) publishLine(line string) int64 {
 	j.subMu.Lock()
 	defer j.subMu.Unlock()
+	seq := j.seq.Add(1)
+	if line == "" {
+		return seq
+	}
 	for _, ch := range j.subs {
 		select {
 		case ch <- line:
 		default: // slow subscriber drops; JobOutput is the fallback
 		}
 	}
+	return seq
 }
 
 func (j *Job) finishSubs() {
