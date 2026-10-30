@@ -12,7 +12,7 @@ import (
 
 	_ "modernc.org/sqlite" // pure-Go driver (CGO_ENABLED=0 discipline)
 
-	"github.com/easydev-org/easyworker/internal/shellh"
+	"github.com/easydev-org/easyworker/internal/script"
 )
 
 // Store persists jobs and their line history to sqlite (modernc). The DB is
@@ -95,6 +95,9 @@ func (s *Store) migrate() error {
 		)`,
 		// Migration for pre-namespace DBs (a duplicate-column error is ignored).
 		`ALTER TABLE jobs ADD COLUMN namespace TEXT NOT NULL DEFAULT 'user'`,
+		// Migration for pre-language DBs. Existing rows read back as "", which the
+		// UI renders as "the worker default" - which is what they actually ran.
+		`ALTER TABLE jobs ADD COLUMN lang TEXT NOT NULL DEFAULT ''`,
 		`CREATE TABLE IF NOT EXISTS job_lines (
 			job_id TEXT NOT NULL,
 			seq INTEGER NOT NULL,
@@ -183,22 +186,17 @@ func (s *Store) writer() {
 	}
 }
 
-// EnqueueJob registers a running job (direct write so ListJobs sees it
-// immediately).
-func (s *Store) EnqueueJob(id, command string, startedAt int64) error {
-	return s.EnqueueJobNS(id, NamespaceUser, command, startedAt)
-}
-
-// EnqueueJobNS is EnqueueJob with an explicit namespace.
-func (s *Store) EnqueueJobNS(id, namespace, command string, startedAt int64) error {
+// EnqueueJob registers a running job (a direct write so ListJobs sees it
+// immediately). Lang is stored with it: a mixed-language history is only useful
+// if each row says which interpreter ran the command.
+func (s *Store) EnqueueJob(id, namespace, command, lang string, startedAt int64) error {
 	if namespace == "" {
 		namespace = NamespaceUser
 	}
-	_, err := s.db.Exec(`INSERT OR REPLACE INTO jobs (id, command, state, exit_code, started_at, finished_at) VALUES (?,?,?,?,?,0)`,
-		id, command, StateRunning, 0, startedAt)
-	if err == nil {
-		_, err = s.db.Exec(`UPDATE jobs SET namespace=? WHERE id=?`, namespace, id)
-	}
+	_, err := s.db.Exec(
+		`INSERT OR REPLACE INTO jobs (id, command, namespace, lang, state, exit_code, started_at, finished_at)
+		 VALUES (?,?,?,?,?,?,?,0)`,
+		id, command, namespace, lang, StateRunning, 0, startedAt)
 	return err
 }
 
@@ -226,9 +224,12 @@ func (s *Store) FinishJob(id, state string, exitCode int32, finishedAt int64) {
 
 // JobRow is one persisted job.
 type JobRow struct {
-	ID         string
-	Command    string
-	Namespace  string
+	ID        string
+	Command   string
+	Namespace string
+	// Lang is the interpreter the command ran in ("" = the worker default, i.e.
+	// rows written before the engine reported one).
+	Lang       string
 	State      string
 	ExitCode   int32
 	StartedAt  int64
@@ -237,9 +238,9 @@ type JobRow struct {
 
 // QueryJob fetches one job row.
 func (s *Store) QueryJob(id string) (JobRow, bool, error) {
-	row := s.db.QueryRow(`SELECT id, command, COALESCE(namespace,''), state, exit_code, started_at, finished_at FROM jobs WHERE id=?`, id)
+	row := s.db.QueryRow(`SELECT id, command, COALESCE(namespace,''), COALESCE(lang,''), state, exit_code, started_at, finished_at FROM jobs WHERE id=?`, id)
 	var r JobRow
-	err := row.Scan(&r.ID, &r.Command, &r.Namespace, &r.State, &r.ExitCode, &r.StartedAt, &r.FinishedAt)
+	err := row.Scan(&r.ID, &r.Command, &r.Namespace, &r.Lang, &r.State, &r.ExitCode, &r.StartedAt, &r.FinishedAt)
 	if err == sql.ErrNoRows {
 		return JobRow{}, false, nil
 	}
@@ -257,7 +258,7 @@ func (s *Store) QueryJobs(limit int) ([]JobRow, error) {
 // QueryJobsNS is QueryJobs optionally filtered to one namespace ("" = all).
 // The filter is applied in SQL so the LIMIT counts only matching rows.
 func (s *Store) QueryJobsNS(limit int, namespace string) ([]JobRow, error) {
-	q := `SELECT id, command, COALESCE(namespace,''), state, exit_code, started_at, finished_at FROM jobs`
+	q := `SELECT id, command, COALESCE(namespace,''), COALESCE(lang,''), state, exit_code, started_at, finished_at FROM jobs`
 	args := []any{}
 	if namespace != "" {
 		q += ` WHERE namespace=?`
@@ -273,7 +274,7 @@ func (s *Store) QueryJobsNS(limit int, namespace string) ([]JobRow, error) {
 	var out []JobRow
 	for rows.Next() {
 		var r JobRow
-		if err := rows.Scan(&r.ID, &r.Command, &r.Namespace, &r.State, &r.ExitCode, &r.StartedAt, &r.FinishedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.Command, &r.Namespace, &r.Lang, &r.State, &r.ExitCode, &r.StartedAt, &r.FinishedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -286,7 +287,7 @@ func (s *Store) QueryJobsNS(limit int, namespace string) ([]JobRow, error) {
 //
 // DEPRECATED for pagination paths: it materializes the whole history. Use
 // CountLines + QueryLinesRange / QueryTail instead.
-func (s *Store) QueryLines(jobID string, stream int) ([]shellh.LineRec, int, error) {
+func (s *Store) QueryLines(jobID string, stream int) ([]script.LineRec, int, error) {
 	q := `SELECT seq, line FROM job_lines WHERE job_id=?`
 	args := []interface{}{jobID}
 	if stream >= 0 {
@@ -299,9 +300,9 @@ func (s *Store) QueryLines(jobID string, stream int) ([]shellh.LineRec, int, err
 		return nil, 0, err
 	}
 	defer rows.Close()
-	var out []shellh.LineRec
+	var out []script.LineRec
 	for rows.Next() {
-		var r shellh.LineRec
+		var r script.LineRec
 		if err := rows.Scan(&r.Seq, &r.Line); err != nil {
 			return nil, 0, err
 		}
@@ -327,7 +328,7 @@ func (s *Store) CountLines(jobID string, stream int) (int, error) {
 // QueryLinesRange returns persisted lines [offset, offset+limit) in seq order
 // (stream -1 = any). Pagination is pushed into SQL so a page costs only its
 // own rows, not the whole history.
-func (s *Store) QueryLinesRange(jobID string, stream, offset, limit int) ([]shellh.LineRec, error) {
+func (s *Store) QueryLinesRange(jobID string, stream, offset, limit int) ([]script.LineRec, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
@@ -344,9 +345,9 @@ func (s *Store) QueryLinesRange(jobID string, stream, offset, limit int) ([]shel
 		return nil, err
 	}
 	defer rows.Close()
-	var out []shellh.LineRec
+	var out []script.LineRec
 	for rows.Next() {
-		var r shellh.LineRec
+		var r script.LineRec
 		if err := rows.Scan(&r.Seq, &r.Line); err != nil {
 			return nil, err
 		}
@@ -357,7 +358,7 @@ func (s *Store) QueryLinesRange(jobID string, stream, offset, limit int) ([]shel
 
 // QueryTail returns the LAST n persisted lines in seq order (stream -1 = any).
 // Reads backwards via the index and reverses — no full scan.
-func (s *Store) QueryTail(jobID string, stream, n int) ([]shellh.LineRec, error) {
+func (s *Store) QueryTail(jobID string, stream, n int) ([]script.LineRec, error) {
 	if n <= 0 {
 		return nil, nil
 	}
@@ -374,9 +375,9 @@ func (s *Store) QueryTail(jobID string, stream, n int) ([]shellh.LineRec, error)
 		return nil, err
 	}
 	defer rows.Close()
-	var rev []shellh.LineRec
+	var rev []script.LineRec
 	for rows.Next() {
-		var r shellh.LineRec
+		var r script.LineRec
 		if err := rows.Scan(&r.Seq, &r.Line); err != nil {
 			return nil, err
 		}
@@ -386,7 +387,7 @@ func (s *Store) QueryTail(jobID string, stream, n int) ([]shellh.LineRec, error)
 		return nil, err
 	}
 	// reverse into seq order
-	out := make([]shellh.LineRec, len(rev))
+	out := make([]script.LineRec, len(rev))
 	for i, r := range rev {
 		out[len(rev)-1-i] = r
 	}

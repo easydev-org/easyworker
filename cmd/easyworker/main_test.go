@@ -40,48 +40,52 @@ func TestTakeBootTokenRemovesFromEnv(t *testing.T) {
 	}
 }
 
-// jobEnv inherits the worker's environment: arbitrary variables (e.g. a
-// toolchain knob) must reach jobs without being enumerated anywhere.
-func TestJobEnvInheritsArbitraryVars(t *testing.T) {
+// Jobs inherit the worker's process environment, so an arbitrary variable (a
+// toolchain knob, say) must reach them without being enumerated anywhere.
+// ensureProcessEnv only ADDS missing keys, so this must survive untouched.
+func TestProcessEnvKeepsArbitraryVars(t *testing.T) {
 	t.Setenv("SOME_TOOLCHAIN_KNOB", "abc")
 	t.Setenv("VCINSTALLDIR", `C:\VC`)
 
-	env := jobEnv()
-	if !envHas(env, "SOME_TOOLCHAIN_KNOB", "abc") {
-		t.Errorf("inherited var missing: %v", env)
+	ensureProcessEnv()
+
+	if got := os.Getenv("SOME_TOOLCHAIN_KNOB"); got != "abc" {
+		t.Errorf("SOME_TOOLCHAIN_KNOB = %q, want abc", got)
 	}
-	if !envHas(env, "VCINSTALLDIR", `C:\VC`) {
-		t.Errorf("inherited var missing: %v", env)
+	if got := os.Getenv("VCINSTALLDIR"); got != `C:\VC` {
+		t.Errorf("VCINSTALLDIR = %q", got)
 	}
 }
 
-// A token that was unset before jobEnv (the normal startup order) must not
-// appear in the job environment.
-func TestJobEnvDropsUnsetToken(t *testing.T) {
+// A token that was unset before startup (the normal order) must not be in the
+// environment jobs inherit.
+func TestProcessEnvDropsUnsetToken(t *testing.T) {
 	t.Setenv("WORKER_TOKEN", "secret-token")
 	_ = takeBootToken()
 
-	if _, ok := envKey(jobEnv(), "WORKER_TOKEN"); ok {
-		t.Fatal("jobEnv leaked WORKER_TOKEN")
+	if _, ok := os.LookupEnv("WORKER_TOKEN"); ok {
+		t.Fatal("WORKER_TOKEN survived takeBootToken")
 	}
 }
 
-// PATH must be present even when the process has none (minimal container).
-func TestJobEnvSynthesizesPath(t *testing.T) {
+// PATH must be present even when the process has none (a minimal container),
+// because a job cannot resolve its own interpreter without it.
+func TestProcessEnvSynthesizesPath(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unix-only default")
 	}
-	// t.Setenv cannot unset; emulate a missing PATH by removing it via
-	// os.Unsetenv and restoring afterwards.
 	old, had := os.LookupEnv("PATH")
 	_ = os.Unsetenv("PATH")
 	defer func() {
+		_ = os.Unsetenv("PATH")
 		if had {
 			_ = os.Setenv("PATH", old)
 		}
 	}()
 
-	if _, ok := envKey(jobEnv(), "PATH"); !ok {
-		t.Fatal("jobEnv did not synthesize PATH")
+	ensureProcessEnv()
+
+	if _, ok := os.LookupEnv("PATH"); !ok {
+		t.Fatal("ensureProcessEnv did not synthesize PATH")
 	}
 }

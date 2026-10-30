@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/easydev-org/easyworker/internal/a11y/native"
-	"github.com/easydev-org/easyworker/internal/shellh"
+	"github.com/easydev-org/easyworker/internal/script"
 )
 
 // App is one running GUI application (Android: the foreground package).
@@ -54,7 +54,7 @@ func envOS() string {
 // Resolve picks the driver for this worker's platform. It never fails: an
 // unsupported platform resolves to the X11/AT-SPI driver, whose methods return
 // a clear error if the tool is missing.
-func Resolve(r *shellh.Runner) Driver {
+func Resolve(r *script.Runner) Driver {
 	// native-a11y (abc-agent/worker-native): when the daemon is enabled, it owns
 	// the a11y tree / input / capture, so drive it over HTTP.
 	if native.Enabled() {
@@ -99,19 +99,26 @@ func nativeDisplay() string {
 
 // ---- shared command helpers (used by every driver) ----
 
-// run interprets one command through the worker's builtin shell and returns its
-// result. stdout/stderr are captured (not streamed): GUI ops are short.
-func run(ctx context.Context, r *shellh.Runner, command string) (shellh.Result, error) {
+// cmdResult is a finished command's outcome, including what it printed. script.
+// Result deliberately carries only the exit code and the language: output goes to
+// the writers you pass. GUI helpers want the text, so they collect it here.
+type cmdResult struct {
+	ExitCode int
+	Stdout   string
+	Stderr   string
+}
+
+// run interprets one command through the engine and captures its output (not
+// streamed): GUI ops are short and the caller needs the text.
+func run(ctx context.Context, r *script.Runner, command string) (cmdResult, error) {
 	var out, errb strings.Builder
-	res, err := r.Run(ctx, command, "", nil, &out, &errb)
-	res.Stdout = out.String()
-	res.Stderr = errb.String()
-	return res, err
+	res, err := r.Run(ctx, script.Spec{Code: command, Stdout: &out, Stderr: &errb})
+	return cmdResult{ExitCode: res.ExitCode, Stdout: out.String(), Stderr: errb.String()}, err
 }
 
 // runChecked runs a command and returns its stdout, erroring on a non-zero exit
 // (with stderr in the message).
-func runChecked(ctx context.Context, r *shellh.Runner, command string) (string, error) {
+func runChecked(ctx context.Context, r *script.Runner, command string) (string, error) {
 	res, err := run(ctx, r, command)
 	if err != nil {
 		return "", err
@@ -123,7 +130,7 @@ func runChecked(ctx context.Context, r *shellh.Runner, command string) (string, 
 }
 
 // hasTool reports whether a binary is on PATH.
-func hasTool(ctx context.Context, r *shellh.Runner, name string) bool {
+func hasTool(ctx context.Context, r *script.Runner, name string) bool {
 	res, err := run(ctx, r, "command -v "+shq(name))
 	return err == nil && res.ExitCode == 0 && strings.TrimSpace(res.Stdout) != ""
 }

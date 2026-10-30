@@ -14,7 +14,7 @@ import (
 	"github.com/easydev-org/easyworker/gen/worker/v1/workerv1connect"
 	"github.com/easydev-org/easyworker/internal/filesvc"
 	"github.com/easydev-org/easyworker/internal/jobsvc"
-	"github.com/easydev-org/easyworker/internal/shellh"
+	"github.com/easydev-org/easyworker/internal/script"
 	"github.com/easydev-org/easyworker/internal/toolchains"
 )
 
@@ -35,12 +35,12 @@ func waitMaxFromEnv() time.Duration {
 type WorkerService struct {
 	jobs       *jobsvc.Manager
 	files      *filesvc.Service
-	shell      *shellh.Runner
+	shell      *script.Runner
 	toolchains *toolchains.Installer
 	bootID     string
 }
 
-func NewService(jobs *jobsvc.Manager, files *filesvc.Service, shell *shellh.Runner, tc *toolchains.Installer) *WorkerService {
+func NewService(jobs *jobsvc.Manager, files *filesvc.Service, shell *script.Runner, tc *toolchains.Installer) *WorkerService {
 	var b [16]byte
 	_, _ = rand.Read(b[:])
 	return &WorkerService{jobs: jobs, files: files, shell: shell, toolchains: tc, bootID: hex.EncodeToString(b[:])}
@@ -48,7 +48,7 @@ func NewService(jobs *jobsvc.Manager, files *filesvc.Service, shell *shellh.Runn
 
 // Runner exposes the builtin shell runner (the ComputerService drives GUI
 // tools through it).
-func (s *WorkerService) Runner() *shellh.Runner { return s.shell }
+func (s *WorkerService) Runner() *script.Runner { return s.shell }
 
 func (s *WorkerService) Info(ctx context.Context, req *workerv1.InfoRequest) (*workerv1.InfoResponse, error) {
 	return &workerv1.InfoResponse{
@@ -58,14 +58,41 @@ func (s *WorkerService) Info(ctx context.Context, req *workerv1.InfoRequest) (*w
 		// interpreter (bash by default, python/node/... available), never to a
 		// host shell and never to an in-process interpreter. Reporting the
 		// language tells the model what it is writing.
-		Shell: "easyscript(" + shellh.DefaultLanguage + ")",
+		Shell: "easyscript(" + script.DefaultLanguage + ")",
 		// Slash-form so a Windows worker reports C:/... consistently to the UI.
 		Workspace:    filepath.ToSlash(s.files.Root()),
 		BootId:       s.bootID,
 		DroppedLines: s.jobs.Dropped(),
 		Home:         filepath.ToSlash(homeDir()),
 		Capabilities: probeCapabilities(),
+		Interpreters: s.interpreters(ctx),
 	}, nil
+}
+
+// interpreters reports which languages this worker can actually run, probed at
+// request time. A client uses this to offer a language picker instead of
+// assuming bash; the list is empty when nothing is installed, which is a real
+// answer ("this image cannot run anything"), not an error.
+func (s *WorkerService) interpreters(ctx context.Context) []*workerv1.Interpreter {
+	eng := s.shell.Engine()
+	if eng == nil {
+		return nil
+	}
+	vers := eng.Languages(ctx)
+	out := make([]*workerv1.Interpreter, 0, len(vers))
+	for _, v := range vers {
+		if !v.Found {
+			continue
+		}
+		out = append(out, &workerv1.Interpreter{
+			Id:      v.ID,
+			Name:    v.Name,
+			Path:    v.Path,
+			Version: v.Version,
+			Modes:   v.Modes,
+		})
+	}
+	return out
 }
 
 func (s *WorkerService) Execute(ctx context.Context, req *workerv1.ExecuteRequest) (*workerv1.ExecuteResponse, error) {
@@ -82,7 +109,18 @@ func (s *WorkerService) Execute(ctx context.Context, req *workerv1.ExecuteReques
 	if ns == "" {
 		ns = jobsvc.NamespaceUser
 	}
-	id, err := s.jobs.ExecuteNS(ctx, ns, req.Command, req.Workdir, req.Env, req.TimeoutMs)
+	// NOTE: req.Env is deliberately NOT forwarded. The engine has no per-job
+	// environment: an "extra env" is either an overlay (a second concept for every
+	// caller) or a replacement (which silently drops PATH and breaks subprocess).
+	// A caller that needs a variable sets it inside its program.
+	id, err := s.jobs.ExecuteNS(ctx, jobsvc.ExecOpts{
+		Namespace: ns,
+		Command:   req.Command,
+		Workdir:   req.Workdir,
+		Lang:      req.GetLang(),
+		Mode:      req.GetMode(),
+		TimeoutMs: req.TimeoutMs,
+	})
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err.Error()).WithCause(err)
 	}
@@ -98,7 +136,7 @@ func (s *WorkerService) ensureToolchains(ctx context.Context) error {
 	if s.toolchains == nil {
 		return nil
 	}
-	specs, err := toolchains.SpecsFromEnv(os.Getenv("WORKSPACE_TOOLCHAINS"), s.shell.Workspace())
+	specs, err := toolchains.SpecsFromEnv(os.Getenv("WORKSPACE_TOOLCHAINS"), s.shell.Root())
 	if err != nil {
 		return err
 	}
@@ -110,7 +148,6 @@ func (s *WorkerService) ensureToolchains(ctx context.Context) error {
 		return err
 	}
 	if len(bins) > 0 {
-		s.shell.AddPaths(bins...)
 		prependProcessPath(bins)
 	}
 	return nil
@@ -129,6 +166,7 @@ func (s *WorkerService) ListJobs(ctx context.Context, req *workerv1.ListJobsRequ
 		out = append(out, &workerv1.JobEntry{
 			Id:         r.ID,
 			Command:    r.Command,
+			Lang:       r.Lang,
 			Namespace:  r.Namespace,
 			State:      r.State,
 			ExitCode:   r.ExitCode,
@@ -246,7 +284,7 @@ func streamOf(s string) int {
 }
 
 func (s *WorkerService) JobWait(ctx context.Context, req *workerv1.JobWaitRequest) (*workerv1.JobWaitResponse, error) {
-	shellh.Debugf("JobWait rpc: job %s timeoutMs=%d mono=%d", req.JobId, req.TimeoutMs, shellh.MonoMS())
+	script.Debugf("JobWait rpc: job %s timeoutMs=%d mono=%d", req.JobId, req.TimeoutMs, script.MonoMS())
 	job, err := s.jobs.Get(req.JobId)
 	if err != nil {
 		// Post-restart finished job: answer from the store.
@@ -266,13 +304,13 @@ func (s *WorkerService) JobWait(ctx context.Context, req *workerv1.JobWaitReques
 	defer timer.Stop()
 	select {
 	case <-job.Done():
-		shellh.Debugf("JobWait rpc: job %s -> done branch", req.JobId)
+		script.Debugf("JobWait rpc: job %s -> done branch", req.JobId)
 		res := job.Result()
 		return &workerv1.JobWaitResponse{State: job.State, ExitCode: res.ExitCode}, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case <-timer.C:
-		shellh.Debugf("JobWait rpc: job %s -> TIMEOUT branch (state=%s)", req.JobId, job.State)
+		script.Debugf("JobWait rpc: job %s -> TIMEOUT branch (state=%s)", req.JobId, job.State)
 		return &workerv1.JobWaitResponse{State: job.State, ExitCode: job.ExitCode}, nil
 	}
 }
@@ -289,13 +327,13 @@ func (s *WorkerService) JobStdin(ctx context.Context, req *workerv1.JobStdinRequ
 }
 
 func (s *WorkerService) JobKill(ctx context.Context, req *workerv1.JobKillRequest) (*workerv1.JobKillResponse, error) {
-	shellh.Debugf("JobKill rpc: job %s", req.JobId)
+	script.Debugf("JobKill rpc: job %s", req.JobId)
 	job, err := s.jobs.Get(req.JobId)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err.Error()).WithCause(err)
 	}
 	job.Kill()
-	shellh.Debugf("JobKill rpc: cancel() called for %s mono=%d", req.JobId, shellh.MonoMS())
+	script.Debugf("JobKill rpc: cancel() called for %s mono=%d", req.JobId, script.MonoMS())
 	return &workerv1.JobKillResponse{Ok: true}, nil
 }
 

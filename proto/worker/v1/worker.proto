@@ -50,6 +50,23 @@ message InfoResponse {
   // the binary). Lets a client (the control panel, the gateway) decide what to
   // offer WITHOUT knowing the image ahead of time.
   Capabilities capabilities = 8;
+  // Interpreters the engine can actually run, probed at request time. This is
+  // what lets a client offer a language picker instead of assuming bash: an
+  // entry is present only when the interpreter RAN a probe program, so a binary
+  // that exists but cannot execute is never offered.
+  repeated Interpreter interpreters = 9;
+}
+
+// Interpreter is one language the engine can drive on THIS host.
+message Interpreter {
+  string id = 1;      // "bash", "python", "node", ...
+  string name = 2;    // "Bash", "Python", ...
+  string path = 3;    // resolved executable
+  string version = 4; // as reported by the interpreter ("" when it has none)
+  // Named execution modes this language declares (node: cjs/esm; bash: posix).
+  // Empty means the language has no either/or choice, so a client must not show
+  // a mode picker for it.
+  repeated string modes = 5;
 }
 
 // Capabilities describes optional runtime features present in the sandbox.
@@ -93,7 +110,12 @@ message Capabilities {
 message ExecuteRequest {
   string command = 1;
   string workdir = 2; // relative to the workspace root
-  map<string, string> env = 3;
+  // Field 3 (map<string,string> env) is REMOVED and reserved: the engine refuses
+  // per-job environments. An "extra env" is either an overlay (a second concept
+  // for every caller) or a replacement that silently drops PATH and breaks child
+  // processes. A caller that needs a variable sets it inside its program.
+  reserved 3;
+  reserved "env";
   // Optional wall-clock deadline: when set and exceeded, the job's whole
   // process tree is killed and the job ends in state `killed`. Cleaner than
   // wrapping the command in `timeout`, which swallows the recorded output.
@@ -101,6 +123,13 @@ message ExecuteRequest {
   // Job namespace: "user" (default) for caller commands, "computer" for the
   // worker's own GUI-automation operations. Lets a UI group them.
   string namespace = 5;
+  // Language the command is written in ("" = the worker's default, bash). Must
+  // be one of Info.interpreter ids; an unknown or unusable one is rejected at
+  // Execute time rather than failing the job afterwards.
+  string lang = 6;
+  // Named mode for that language ("" = the interpreter default). Sending a mode
+  // a language does not declare is an error, never a silent fallback.
+  string mode = 7;
 }
 message ExecuteResponse { string job_id = 1; }
 
@@ -109,6 +138,8 @@ message JobEntry {
   string command = 2;
   // Namespace the job was registered under (see ExecuteRequest.namespace).
   string namespace = 7;
+  // Language the command ran in, so a client can label a job without guessing.
+  string lang = 8;
   string state = 3; // running | done | killed | failed
   int32 exit_code = 4;
   int64 started_at = 5;  // unix millis

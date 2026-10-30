@@ -22,7 +22,7 @@ import (
 	workerv1connect "github.com/easydev-org/easyworker/gen/worker/v1/workerv1connect"
 	"github.com/easydev-org/easyworker/internal/filesvc"
 	"github.com/easydev-org/easyworker/internal/jobsvc"
-	"github.com/easydev-org/easyworker/internal/shellh"
+	"github.com/easydev-org/easyworker/internal/script"
 	"github.com/easydev-org/easyworker/internal/toolchains"
 )
 
@@ -34,7 +34,7 @@ func TestExecuteEnsuresDeclaredToolchain(t *testing.T) {
 	blob := makeToolTarGz(t, "go", map[string]string{"bin/mytool": "#!/bin/sh\necho from-toolchain\n"})
 	idxURL := writeIndex(t, ws, blob, sha256Hex(blob))
 
-	runner := shellh.New(ws, []string{"PATH=/usr/bin:/bin"})
+	runner := script.New(ws)
 	store, err := jobsvc.OpenStore(filepath.Join(ws, "jobs.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -74,7 +74,7 @@ func TestExecuteToolchainFailureFailsJob(t *testing.T) {
 	blob := makeToolTarGz(t, "go", map[string]string{"bin/mytool": "x"})
 	idxURL := writeIndex(t, ws, blob, strings.Repeat("0", 64))
 
-	runner := shellh.New(ws, []string{"PATH=/usr/bin:/bin"})
+	runner := script.New(ws)
 	store, err := jobsvc.OpenStore(filepath.Join(ws, "jobs.db"))
 	if err != nil {
 		t.Fatal(err)

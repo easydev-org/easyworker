@@ -16,13 +16,13 @@ import (
 	workerv1connect "github.com/easydev-org/easyworker/gen/worker/v1/workerv1connect"
 	"github.com/easydev-org/easyworker/internal/filesvc"
 	"github.com/easydev-org/easyworker/internal/jobsvc"
-	"github.com/easydev-org/easyworker/internal/shellh"
+	"github.com/easydev-org/easyworker/internal/script"
 )
 
 func newTestServer(t *testing.T) (client workerv1connect.WorkerServiceClient, cleanup func()) {
 	t.Helper()
 	ws := t.TempDir()
-	runner := shellh.New(ws, []string{"PATH=/usr/bin:/bin"})
+	runner := script.New(ws)
 	store, err := jobsvc.OpenStore(filepath.Join(ws, "jobs.db"))
 	if err != nil {
 		t.Fatal(err)

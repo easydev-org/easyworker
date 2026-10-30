@@ -16,7 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/easydev-org/easyworker/internal/shellh"
+	"github.com/easydev-org/easyworker/internal/script"
 )
 
 // Job states (matching the legacy vocabulary).
@@ -33,14 +33,21 @@ type Job struct {
 	Command string
 	// Namespace separates job families so the UI can group them: "user" for
 	// caller commands, "computer" for the worker's own GUI-automation ops.
-	Namespace  string
+	Namespace string
+	// Lang is the language the command was written in ("" = the runner default,
+	// bash). Recorded so a client can label a job without guessing, and so a
+	// mixed-language history still makes sense.
+	Lang string
+	// Mode is the language-specific execution mode the command asked for ("" =
+	// the interpreter default). Recorded for the same reason as Lang.
+	Mode       string
 	State      string
 	ExitCode   int32
 	StartedAt  int64
 	FinishedAt int64
 
-	Stdout *shellh.LineBuffer
-	Stderr *shellh.LineBuffer
+	Stdout *script.LineBuffer
+	Stderr *script.LineBuffer
 
 	subMu sync.Mutex
 	subs  []chan string
@@ -65,7 +72,7 @@ type Result struct {
 
 // Manager owns the job registry, the shared shell runner and the store.
 type Manager struct {
-	runner *shellh.Runner
+	runner *script.Runner
 	store  *Store
 
 	memLines int // per-stream ring size
@@ -75,7 +82,7 @@ type Manager struct {
 	jobs map[string]*Job
 }
 
-func NewManager(runner *shellh.Runner, store *Store, memLines, replay int) *Manager {
+func NewManager(runner *script.Runner, store *Store, memLines, replay int) *Manager {
 	if memLines <= 0 {
 		memLines = 10000
 	}
@@ -100,14 +107,6 @@ func (m *Manager) retentionLoop() {
 // policy; everything on emptyDir anyway).
 const retentionHours = 24
 
-// Execute starts a job: spawn the interpreted run in the background and
-// return immediately with the job id (everything is a job — the legacy
-// fast/slow split is gone, matching worker-go). timeoutMs > 0 arms a
-// wall-clock deadline: the job's process tree is killed and it ends `killed`.
-func (m *Manager) Execute(ctx context.Context, command, workdir string, env map[string]string, timeoutMs int32) (string, error) {
-	return m.ExecuteNS(ctx, NamespaceUser, command, workdir, env, timeoutMs)
-}
-
 // Namespaces: "user" for caller commands, "computer" for the worker's own
 // GUI-automation operations.
 const (
@@ -115,8 +114,35 @@ const (
 	NamespaceComputer = "computer"
 )
 
-// ExecuteNS is Execute with an explicit namespace (see the namespace consts).
-func (m *Manager) ExecuteNS(ctx context.Context, ns, command, workdir string, env map[string]string, timeoutMs int32) (string, error) {
+// ExecOpts is what a caller asks for. It is a struct rather than a parameter list
+// because the list had grown to six positional arguments, and because there is
+// deliberately NO env field: the engine refuses per-job environments (an override
+// is either an overlay to explain or a replacement that silently drops PATH). A
+// caller that needs a variable puts it in the program.
+type ExecOpts struct {
+	// Namespace groups jobs in the UI ("" = NamespaceUser).
+	Namespace string
+	// Command is the program text.
+	Command string
+	// Workdir is relative to the workspace root ("" = the root).
+	Workdir string
+	// Lang is the interpreter id ("" = the runner's default).
+	Lang string
+	// Mode is a declared mode for that language ("" = the interpreter default).
+	Mode string
+	// TimeoutMs > 0 arms a wall-clock deadline: the job's process tree is killed
+	// and it ends `killed`.
+	TimeoutMs int32
+}
+
+// Execute starts a job in the user namespace and returns its id immediately.
+func (m *Manager) Execute(ctx context.Context, opts ExecOpts) (string, error) {
+	return m.ExecuteNS(ctx, opts)
+}
+
+// ExecuteNS starts a job with an explicit namespace (see the namespace consts).
+func (m *Manager) ExecuteNS(ctx context.Context, opts ExecOpts) (string, error) {
+	ns, command, workdir := opts.Namespace, opts.Command, opts.Workdir
 	if ns == "" {
 		ns = NamespaceUser
 	}
@@ -132,14 +158,16 @@ func (m *Manager) ExecuteNS(ctx context.Context, ns, command, workdir string, en
 	}
 
 	jobCtx, cancel := context.WithCancel(context.Background())
-	if timeoutMs > 0 {
-		jobCtx, cancel = context.WithTimeout(jobCtx, time.Duration(timeoutMs)*time.Millisecond)
+	if opts.TimeoutMs > 0 {
+		jobCtx, cancel = context.WithTimeout(jobCtx, time.Duration(opts.TimeoutMs)*time.Millisecond)
 	}
 
 	job := &Job{
 		ID:        id,
 		Command:   command,
 		Namespace: ns,
+		Lang:      opts.Lang,
+		Mode:      opts.Mode,
 		State:     StateRunning,
 		StartedAt: time.Now().UnixMilli(),
 		done:      make(chan struct{}),
@@ -147,11 +175,11 @@ func (m *Manager) ExecuteNS(ctx context.Context, ns, command, workdir string, en
 		cancel:    cancel,
 	}
 	nextSeq := func() int64 { return job.seq.Add(1) }
-	job.Stdout = shellh.NewLineBuffer(m.memLines, nextSeq, func(rec shellh.LineRec) {
+	job.Stdout = script.NewLineBuffer(m.memLines, nextSeq, func(rec script.LineRec) {
 		job.publishLine(rec.Line)                                   // live fanout (stdout only)
 		m.store.TryEnqueueLine(id, rec.Seq, StreamStdout, rec.Line) // persistence
 	})
-	job.Stderr = shellh.NewLineBuffer(m.memLines, nextSeq, func(rec shellh.LineRec) {
+	job.Stderr = script.NewLineBuffer(m.memLines, nextSeq, func(rec script.LineRec) {
 		job.publishLine(rec.Line)                                   // live fanout (stderr)
 		m.store.TryEnqueueLine(id, rec.Seq, StreamStderr, rec.Line) // persistence
 	})
@@ -160,7 +188,7 @@ func (m *Manager) ExecuteNS(ctx context.Context, ns, command, workdir string, en
 	m.jobs[id] = job
 	m.mu.Unlock()
 
-	if err := m.store.EnqueueJobNS(id, ns, command, job.StartedAt); err != nil {
+	if err := m.store.EnqueueJob(id, ns, command, opts.Lang, job.StartedAt); err != nil {
 		// Non-fatal: history queries just won't see it.
 		fmt.Printf("store: enqueue job %s: %v\n", id, err)
 	}
@@ -184,12 +212,19 @@ func (m *Manager) ExecuteNS(ctx context.Context, ns, command, workdir string, en
 			}
 		}()
 
-		shellh.Debugf("job %s: goroutine start (cmd=%q)", id, command)
-		// easyscript has no dataflow graph: output is an ordered stdout/stderr
-		// line stream, and that is all the panel gets. The per-job sink that used
-		// to persist every flow's bytes is gone with it.
-		res, err := m.runner.RunWithEnv(jobCtx, command, workdir, nil, r, job.Stdout, job.Stderr)
-		shellh.Debugf("job %s: Run returned (err=%v, exit=%d, ctxErr=%v) mono=%d", id, err, res.ExitCode, jobCtx.Err() != nil, shellh.MonoMS())
+		script.Debugf("job %s: goroutine start (lang=%q cmd=%q)", id, job.Lang, command)
+		// Output is an ordered stdout/stderr line stream and nothing else; there is
+		// no dataflow graph to persist and no per-job environment to apply.
+		res, err := m.runner.Run(jobCtx, script.Spec{
+			Code:    command,
+			Lang:    job.Lang,
+			Mode:    job.Mode,
+			Workdir: workdir,
+			Stdin:   r,
+			Stdout:  job.Stdout,
+			Stderr:  job.Stderr,
+		})
+		script.Debugf("job %s: Run returned (err=%v, exit=%d, ctxErr=%v) mono=%d", id, err, res.ExitCode, jobCtx.Err() != nil, script.MonoMS())
 		// Promote a trailing partial line (output without final \n) into the
 		// history before signaling completion.
 		_ = job.Stdout.FlushLine()
@@ -213,7 +248,7 @@ func (m *Manager) ExecuteNS(ctx context.Context, ns, command, workdir string, en
 		job.State = state
 		job.FinishedAt = time.Now().UnixMilli()
 		m.store.FinishJob(id, state, job.ExitCode, job.FinishedAt)
-		shellh.Debugf("job %s: state=%s exit=%d (done closing) mono=%d", id, state, job.ExitCode, shellh.MonoMS())
+		script.Debugf("job %s: state=%s exit=%d (done closing) mono=%d", id, state, job.ExitCode, script.MonoMS())
 	}()
 
 	return id, nil
@@ -247,7 +282,7 @@ func (m *Manager) Record(ns, command string) {
 	}
 	id := newID()
 	now := time.Now().UnixMilli()
-	if err := m.store.EnqueueJobNS(id, ns, command, now); err != nil {
+	if err := m.store.EnqueueJob(id, ns, command, "", now); err != nil {
 		return
 	}
 	m.store.FinishJob(id, StateDone, 0, now)
@@ -273,7 +308,7 @@ func (m *Manager) ListNS(limit int, namespace string) []JobRow {
 			continue // store row may lag one flush; memory is fresher
 		}
 		byID[j.ID] = JobRow{
-			ID: j.ID, Command: j.Command, Namespace: j.Namespace, State: j.State,
+			ID: j.ID, Command: j.Command, Namespace: j.Namespace, Lang: j.Lang, State: j.State,
 			ExitCode: j.ExitCode, StartedAt: j.StartedAt, FinishedAt: j.FinishedAt,
 		}
 	}
@@ -311,7 +346,7 @@ func (m *Manager) Prune(maxAge time.Duration) {
 //
 // DEPRECATED for pagination paths (materializes everything); kept for
 // whole-history consumers (tail computation, small jobs).
-func (m *Manager) readMerged(id string, stream int) ([]shellh.LineRec, error) {
+func (m *Manager) readMerged(id string, stream int) ([]script.LineRec, error) {
 	persisted, _, err := m.store.QueryLines(id, stream)
 	if err != nil {
 		return nil, err
@@ -326,8 +361,8 @@ func (m *Manager) readMerged(id string, stream int) ([]shellh.LineRec, error) {
 	if err != nil {
 		return persisted, nil // post-restart / pruned: DB is authoritative
 	}
-	var mem []shellh.LineRec
-	appendStream := func(recs []shellh.LineRec) {
+	var mem []script.LineRec
+	appendStream := func(recs []script.LineRec) {
 		for _, r := range recs {
 			if r.Seq > maxSeq {
 				mem = append(mem, r)
@@ -348,19 +383,19 @@ func (m *Manager) readMerged(id string, stream int) ([]shellh.LineRec, error) {
 func (m *Manager) Store() *Store { return m.store }
 
 // MergedRecs is the exported readMerged for tail computation.
-func (m *Manager) MergedRecs(id string, stream int) ([]shellh.LineRec, error) {
+func (m *Manager) MergedRecs(id string, stream int) ([]script.LineRec, error) {
 	return m.readMerged(id, stream)
 }
 
 // memSuffix returns the job's in-memory ring lines with seq > afterSeq
 // (stream -1 = both), in seq order. Empty when the job is out of memory.
-func (m *Manager) memSuffix(id string, stream int, afterSeq int64) []shellh.LineRec {
+func (m *Manager) memSuffix(id string, stream int, afterSeq int64) []script.LineRec {
 	j, err := m.Get(id)
 	if err != nil {
 		return nil
 	}
-	var mem []shellh.LineRec
-	appendStream := func(recs []shellh.LineRec) {
+	var mem []script.LineRec
+	appendStream := func(recs []script.LineRec) {
 		for _, r := range recs {
 			if r.Seq > afterSeq {
 				mem = append(mem, r)
@@ -480,7 +515,7 @@ func (m *Manager) ReplayTailStream(id string, stream, n int) []string {
 	}
 	mem := m.memSuffix(id, stream, maxSeq)
 	need := n - len(mem)
-	var recs []shellh.LineRec
+	var recs []script.LineRec
 	if need > 0 {
 		persisted, err := m.store.QueryTail(id, stream, need)
 		if err == nil {
@@ -549,7 +584,7 @@ func (j *Job) Subscribe() (replay []string, ch chan string) {
 	defer j.subMu.Unlock()
 	recs := append(j.Stdout.Recs(), j.Stderr.Recs()...)
 	sort.Slice(recs, func(a, b int) bool { return recs[a].Seq < recs[b].Seq })
-	recsToLines := func(recs []shellh.LineRec) []string {
+	recsToLines := func(recs []script.LineRec) []string {
 		out := make([]string, 0, len(recs))
 		for _, r := range recs {
 			out = append(out, r.Line)

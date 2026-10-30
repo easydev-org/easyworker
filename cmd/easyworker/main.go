@@ -33,7 +33,7 @@ import (
 	"github.com/easydev-org/easyworker/internal/desktopproxy"
 	"github.com/easydev-org/easyworker/internal/filesvc"
 	"github.com/easydev-org/easyworker/internal/jobsvc"
-	"github.com/easydev-org/easyworker/internal/shellh"
+	"github.com/easydev-org/easyworker/internal/script"
 	"github.com/easydev-org/easyworker/internal/stream"
 	"github.com/easydev-org/easyworker/internal/toolchains"
 	"github.com/easydev-org/easyworker/internal/webui"
@@ -71,7 +71,7 @@ func main() {
 
 	// Capture the pre-authorized token, then drop it from the process
 	// environment BEFORE building the job env: jobs inherit the worker's
-	// environ (see jobEnv), and the token must not travel with them. The auth
+	// environ (see ensureProcessEnv), and the token must not travel with them. The auth
 	// gate below keeps the returned value in memory.
 	bootToken := takeBootToken()
 
@@ -91,9 +91,8 @@ func main() {
 	if bins := toolchains.ExistingBinDirs(tc.Root()); len(bins) > 0 {
 		_ = os.Setenv("PATH", toolchains.MergePath(os.Getenv("PATH"), bins))
 	}
-	env := jobEnv()
-
-	runner := shellh.New(ws, env)
+	ensureProcessEnv()
+	runner := script.New(ws)
 	store, err := jobsvc.OpenStore(db)
 	if err != nil {
 		log.Fatalf("open store %s: %v", db, err)
@@ -278,7 +277,7 @@ func defaultWorkspace() string {
 }
 
 // takeBootToken reads WORKER_TOKEN and then removes it from the process
-// environment, so jobs (which inherit the worker's environ — see jobEnv) can
+// environment, so jobs (which inherit the workers environ — see ensureProcessEnv) can
 // never see it. Callers keep the returned value in memory for the auth gate.
 func takeBootToken() string {
 	tok := os.Getenv("WORKER_TOKEN")
@@ -288,23 +287,29 @@ func takeBootToken() string {
 	return tok
 }
 
-// jobEnv builds the base environment for interpreted jobs by INHERITING the
-// worker's own environment. The sandbox image (or the host launcher) is the
-// source of truth for toolchain variables, so a default-deny allowlist would
-// have to enumerate every variable of every toolchain — an endless, brittle
-// treadmill that breaks Windows (cmd.exe/ComSpec, MSVC, .NET, Gradle, pip…)
-// and any newly added tool. Inheritance means a new toolchain works with no
-// code change.
+// ensureProcessEnv fills in variables the process is MISSING so interpreted jobs
+// (which inherit this process's environment verbatim) still work on a minimal
+// image.
 //
-// The only secret the worker itself holds (WORKER_TOKEN) is removed from the
-// process environment before this runs (takeBootToken), so it is not
-// inherited. This is NOT a security boundary — a job runs at the same
-// privilege as the worker and could read /proc/<pid>/environ or worker.state
-// regardless — it only prevents ACCIDENTAL leakage via `env`/verbose builds.
+// Why inherit at all: the sandbox image is the source of truth for toolchain
+// variables, so a default-deny allowlist would have to enumerate every variable
+// of every toolchain — an endless, brittle treadmill that breaks Windows
+// (cmd.exe/ComSpec, MSVC, .NET, Gradle, pip…) and any newly added tool.
+// Inheritance means a new toolchain works with no code change.
 //
-// Per-job ExecuteRequest.env is layered on top by the runner (additive,
-// overriding), so callers can still inject arbitrary variables per job.
-func jobEnv() []string {
+// Why fill gaps: a scratch image may have no PATH at all, and a baked-in egress
+// CA may never have been exported. Synthesizing those turns "mysteriously broken"
+// into "works". Nothing is ever OVERRIDDEN — only missing keys are added.
+//
+// The worker's own secret (WORKER_TOKEN) is removed from the environment before
+// this runs (takeBootToken), so it is not inherited. This is NOT a security
+// boundary — a job runs with the worker's privileges and could read
+// /proc/<pid>/environ regardless — it only prevents ACCIDENTAL leakage via
+// `env` or verbose build logs.
+//
+// It mutates the process environment in place, because the engine reads that: a
+// per-job environment is deliberately not a thing.
+func ensureProcessEnv() {
 	out := os.Environ()
 
 	// Synthesize platform defaults the process may be missing (e.g. a minimal
@@ -342,7 +347,18 @@ func jobEnv() []string {
 			}
 		}
 	}
-	return out
+	// Write back only the keys we synthesized (never the whole environment, which
+	// would be a no-op churn).
+	for _, kv := range out {
+		i := strings.IndexByte(kv, '=')
+		if i <= 0 {
+			continue
+		}
+		key, val := kv[:i], kv[i+1:]
+		if os.Getenv(key) == "" {
+			_ = os.Setenv(key, val)
+		}
+	}
 }
 
 // firstExistingFile returns the first path that exists, else "".

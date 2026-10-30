@@ -17,7 +17,7 @@ import (
 	"github.com/easydev-org/easyworker/internal/auth"
 	"github.com/easydev-org/easyworker/internal/filesvc"
 	"github.com/easydev-org/easyworker/internal/jobsvc"
-	"github.com/easydev-org/easyworker/internal/shellh"
+	"github.com/easydev-org/easyworker/internal/script"
 )
 
 // newServer builds a real worker handler (auth gate + enroll + WorkerService)
@@ -25,7 +25,7 @@ import (
 func newServer(t *testing.T) (*httptest.Server, *auth.Gate) {
 	t.Helper()
 	ws := t.TempDir()
-	runner := shellh.New(ws, nil)
+	runner := script.New(ws)
 	store, err := jobsvc.OpenStore(t.TempDir() + "/jobs.db")
 	if err != nil {
 		t.Fatal(err)

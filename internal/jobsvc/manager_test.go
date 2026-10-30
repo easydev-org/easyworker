@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/easydev-org/easyworker/internal/shellh"
+	"github.com/easydev-org/easyworker/internal/script"
 )
 
 func newTestManager(t *testing.T) (*Manager, string) {
@@ -19,13 +19,13 @@ func newTestManager(t *testing.T) (*Manager, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	return NewManager(shellh.New(ws, []string{"PATH=/usr/bin:/bin"}), store, 1000, 200), dbPath
+	return NewManager(script.New(ws), store, 1000, 200), dbPath
 }
 
 func TestExecuteLifecycle(t *testing.T) {
 	m, _ := newTestManager(t)
 
-	id, err := m.Execute(context.Background(), "echo hi && sleep 0.2 && echo bye", "", nil, 0)
+	id, err := m.Execute(context.Background(), ExecOpts{Command: "echo hi && sleep 0.2 && echo bye", Workdir: "", TimeoutMs: 0})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestExecuteLifecycle(t *testing.T) {
 func TestExecuteNoTrailingNewline(t *testing.T) {
 	m, _ := newTestManager(t)
 
-	id, _ := m.Execute(context.Background(), "printf no-newline-here", "", nil, 0)
+	id, _ := m.Execute(context.Background(), ExecOpts{Command: "printf no-newline-here", Workdir: "", TimeoutMs: 0})
 	job, _ := m.Get(id)
 	<-job.Done()
 
@@ -82,7 +82,7 @@ func TestExecuteNoTrailingNewline(t *testing.T) {
 func TestStreamFilter(t *testing.T) {
 	m, _ := newTestManager(t)
 
-	id, _ := m.Execute(context.Background(), "echo to-out && echo to-err >&2", "", nil, 0)
+	id, _ := m.Execute(context.Background(), ExecOpts{Command: "echo to-out && echo to-err >&2", Workdir: "", TimeoutMs: 0})
 	job, _ := m.Get(id)
 	<-job.Done()
 
@@ -108,8 +108,8 @@ func TestPersistenceAcrossReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m1 := NewManager(shellh.New(ws, []string{"PATH=/usr/bin:/bin"}), store1, 1000, 200)
-	id, _ := m1.Execute(context.Background(), "echo persist-me", "", nil, 0)
+	m1 := NewManager(script.New(ws), store1, 1000, 200)
+	id, _ := m1.Execute(context.Background(), ExecOpts{Command: "echo persist-me", Workdir: "", TimeoutMs: 0})
 	job, _ := m1.Get(id)
 	<-job.Done()
 
@@ -123,7 +123,7 @@ func TestPersistenceAcrossReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store2.Close()
-	m2 := NewManager(shellh.New(ws, []string{"PATH=/usr/bin:/bin"}), store2, 1000, 200)
+	m2 := NewManager(script.New(ws), store2, 1000, 200)
 
 	lines, total, _, _, done, err := m2.OutputLines(id, -1, 0, 0)
 	if err != nil || total != 1 || len(lines) != 1 || lines[0] != "persist-me" || !done {
@@ -144,7 +144,7 @@ func TestBootRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	// simulate a job that was running when the worker died
-	if err := store1.EnqueueJob("orphan1", "sleep forever", time.Now().UnixMilli()); err != nil {
+	if err := store1.EnqueueJob("orphan1", NamespaceUser, "sleep forever", "", time.Now().UnixMilli()); err != nil {
 		t.Fatal(err)
 	}
 	store1.Close()
@@ -163,7 +163,7 @@ func TestBootRecovery(t *testing.T) {
 func TestRetention(t *testing.T) {
 	m, dbPath := newTestManager(t)
 
-	id, _ := m.Execute(context.Background(), "echo old-job", "", nil, 0)
+	id, _ := m.Execute(context.Background(), ExecOpts{Command: "echo old-job", Workdir: "", TimeoutMs: 0})
 	job, _ := m.Get(id)
 	<-job.Done()
 	time.Sleep(400 * time.Millisecond)
@@ -187,7 +187,7 @@ func TestKillAndStdin(t *testing.T) {
 	m, _ := newTestManager(t)
 
 	// stdin round-trip
-	id, _ := m.Execute(context.Background(), "cat", "", nil, 0)
+	id, _ := m.Execute(context.Background(), ExecOpts{Command: "cat", Workdir: "", TimeoutMs: 0})
 	job, _ := m.Get(id)
 	if err := job.Stdin([]byte("hello\n"), true); err != nil {
 		t.Fatal(err)
@@ -203,7 +203,7 @@ func TestKillAndStdin(t *testing.T) {
 	}
 
 	// kill a sleeping job
-	id2, _ := m.Execute(context.Background(), "sleep 60", "", nil, 0)
+	id2, _ := m.Execute(context.Background(), ExecOpts{Command: "sleep 60", Workdir: "", TimeoutMs: 0})
 	job2, _ := m.Get(id2)
 	time.Sleep(100 * time.Millisecond)
 	job2.Kill()
@@ -220,7 +220,7 @@ func TestKillAndStdin(t *testing.T) {
 func TestExecuteTimeoutKills(t *testing.T) {
 	m, _ := newTestManager(t)
 	// 200ms deadline on a 60s sleep: the worker must kill it.
-	id, err := m.Execute(context.Background(), "sleep 60", "", nil, 200)
+	id, err := m.Execute(context.Background(), ExecOpts{Command: "sleep 60", Workdir: "", TimeoutMs: 200})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +238,7 @@ func TestExecuteTimeoutKills(t *testing.T) {
 func TestOutputLinesSQLPagination(t *testing.T) {
 	m, _ := newTestManager(t)
 	// 250 lines: enough to exercise page offsets against the store.
-	id, _ := m.Execute(context.Background(), "for i in $(seq 1 250); do echo line-$i; done", "", nil, 0)
+	id, _ := m.Execute(context.Background(), ExecOpts{Command: "for i in $(seq 1 250); do echo line-$i; done", Workdir: "", TimeoutMs: 0})
 	job, _ := m.Get(id)
 	select {
 	case <-job.Done():
@@ -280,7 +280,7 @@ func TestOutputLinesSQLPagination(t *testing.T) {
 // nobody would ever close, hanging a WatchJob range forever.
 func TestSubscribeAfterFinishNeverHangs(t *testing.T) {
 	m, _ := newTestManager(t)
-	id, err := m.Execute(context.Background(), "echo done", "", nil, 0)
+	id, err := m.Execute(context.Background(), ExecOpts{Command: "echo done", Workdir: "", TimeoutMs: 0})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,7 +322,7 @@ func TestRecordDoesNotExecuteAndNamespaces(t *testing.T) {
 	}
 
 	// A user job and a computer record must be separable by namespace.
-	id, err := m.Execute(context.Background(), "echo hi", "", nil, 0)
+	id, err := m.Execute(context.Background(), ExecOpts{Command: "echo hi", Workdir: "", TimeoutMs: 0})
 	if err != nil {
 		t.Fatal(err)
 	}
