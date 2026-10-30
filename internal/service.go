@@ -58,7 +58,7 @@ func (s *WorkerService) Info(ctx context.Context, req *workerv1.InfoRequest) (*w
 		// interpreter (bash by default, python/node/... available), never to a
 		// host shell and never to an in-process interpreter. Reporting the
 		// language tells the model what it is writing.
-		Shell: "easyscript(" + script.DefaultLanguage + ")",
+		Shell: "easyscript(" + s.shell.Language() + ")",
 		// Slash-form so a Windows worker reports C:/... consistently to the UI.
 		Workspace:    filepath.ToSlash(s.files.Root()),
 		BootId:       s.bootID,

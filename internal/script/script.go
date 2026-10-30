@@ -25,6 +25,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -32,10 +33,26 @@ import (
 	"github.com/easydev-org/easyscript/pkg/engine"
 )
 
-// DefaultLanguage runs a command when the caller names none. bash is the closest
-// to what this worker's jobs have always been, and every image it ships in has
-// it.
-const DefaultLanguage = "bash"
+// defaultCandidates is the order in which the worker picks its DEFAULT language,
+// per platform. The first one that the engine can actually run wins.
+//
+// A single constant is wrong now that languages are per-platform: bash is the
+// obvious default on Linux and macOS, but it is NOT guaranteed on Windows (it
+// arrives only with Git for Windows or WSL), while PowerShell ships with the OS.
+// Picking bash unconditionally would make every command on a plain Windows image
+// fail to even start, and the error would look like "the daemon is broken".
+var defaultCandidates = map[string][]string{
+	"windows": {"powershell7", "windowspowershell", "nu", "bash", "sh", "python", "node"},
+	// macOS gets zsh first: it is the OS default shell, and the bash that ships
+	// there is 3.2 from 2007.
+	"darwin": {"zsh", "bash", "sh", "nu", "python", "node"},
+	"linux":  {"bash", "sh", "nu", "python", "node"},
+}
+
+// fallbackLanguage is used only if NOTHING in defaultCandidates is available,
+// which means the image has no interpreter at all. Naming one anyway keeps the
+// error message specific ("bash is not installed") instead of vague.
+const fallbackLanguage = "bash"
 
 // Runner executes commands. It is safe for concurrent use.
 type Runner struct {
@@ -53,11 +70,28 @@ type Runner struct {
 // itself resolves tools against, including anything an on-demand toolchain
 // install added to the process PATH.
 func New(root string) *Runner {
+	eng := engine.New(engine.Options{Dir: root})
 	return &Runner{
 		root: root,
-		eng:  engine.New(engine.Options{Dir: root}),
-		lang: DefaultLanguage,
+		eng:  eng,
+		lang: pickDefaultLanguage(eng),
 	}
+}
+
+// pickDefaultLanguage returns the first candidate this host can actually run.
+//
+// It probes ONCE at construction: the answer is a property of the image, not of
+// any request, and a caller who explicitly names a language is unaffected. When
+// nothing is available (an image with no interpreter at all) it still returns a
+// name, so the failure a caller sees says which one is missing.
+func pickDefaultLanguage(eng *engine.Engine) string {
+	sup := eng.Supported(context.Background())
+	for _, id := range defaultCandidates[runtime.GOOS] {
+		if _, ok := sup[id]; ok {
+			return id
+		}
+	}
+	return fallbackLanguage
 }
 
 // Root is the directory relative paths resolve against.
