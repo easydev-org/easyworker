@@ -183,22 +183,28 @@ func (m *Manager) ExecuteNS(ctx context.Context, opts ExecOpts) (string, error) 
 	// stdout line should have had. Assigning the seq inside the publish lock makes
 	// the number mean "the order this line was published", which is exactly what
 	// the replay sorts on and what persistence stores.
-	emit := func(stream int) func(script.LineRec) {
-		return func(rec script.LineRec) {
+	emit := func(stream int) func(script.LineRec) int64 {
+		return func(rec script.LineRec) int64 {
 			// A blank line is a real line ("echo" prints an empty line) and MUST be
 			// recorded; publishLine only skips FANNING OUT an empty string, because
 			// a subscriber cannot tell it apart from a dropped event.
 			seq := job.publishLine(rec.Line) // live fanout, ordered
 			m.store.TryEnqueueLine(id, seq, stream, rec.Line)
+			return seq
 		}
 	}
-	// The in-memory ring needs its own monotonically increasing number so
-	// memSuffix can slice it; it is NOT the job-global order (that comes from
-	// publishLine). One counter shared by both buffers keeps the two rings on the
-	// same scale, which is what memSuffix compares across streams.
-	var ringSeq atomic.Int64
-	job.Stdout = script.NewLineBuffer(m.memLines, func() int64 { return ringSeq.Add(1) }, emit(StreamStdout))
-	job.Stderr = script.NewLineBuffer(m.memLines, func() int64 { return ringSeq.Add(1) }, emit(StreamStderr))
+	// The buffers are fed by two goroutines — one per stream — so ANY sequence
+	// number they assign themselves is a race, not an order: which goroutine
+	// reaches the counter first has nothing to do with which line a script
+	// actually printed first. That is exactly how `echo first && sleep 0.3 &&
+	// echo second && echo warn >&2` came out first/warn/second.
+	//
+	// So the buffers do not number anything: they hand each completed line to
+	// emit(), which takes the job-global sequence from publishLine under one lock.
+	// The ring stores that same number (see script.NewLineBuffer's `seq` mode) so
+	// memSuffix slices and replay sorts on the true publication order.
+	job.Stdout = script.NewLineBuffer(m.memLines, nil, emit(StreamStdout))
+	job.Stderr = script.NewLineBuffer(m.memLines, nil, emit(StreamStderr))
 
 	m.mu.Lock()
 	m.jobs[id] = job

@@ -346,3 +346,37 @@ func TestRecordDoesNotExecuteAndNamespaces(t *testing.T) {
 		}
 	}
 }
+
+// TestOutputOrderAcrossStreams pins the bug that took CI down: stdout and stderr
+// are fed by two goroutines, so any counter inside a stream buffer is a race, not
+// an order. A command with a deliberate gap between two stdout lines and a stderr
+// line after them must come out in the order it PRINTED, not the order the two
+// goroutines happened to reach a lock.
+func TestOutputOrderAcrossStreams(t *testing.T) {
+	m, _ := newTestManager(t)
+	id, err := m.Execute(context.Background(), ExecOpts{
+		Command: "echo first && sleep 0.15 && echo second && echo warn >&2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := m.Get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-job.Done()
+
+	lines, total, _, _, _, err := m.OutputLines(id, -1, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"first", "second", "warn"}
+	if total != int32(len(want)) || len(lines) != len(want) {
+		t.Fatalf("total=%d lines=%v, want %v", total, lines, want)
+	}
+	for i := range want {
+		if lines[i] != want[i] {
+			t.Fatalf("line %d = %q, want %q (all: %v)", i, lines[i], want[i], lines)
+		}
+	}
+}

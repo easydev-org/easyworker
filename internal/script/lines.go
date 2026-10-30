@@ -21,7 +21,7 @@ type LineRec struct {
 type LineBuffer struct {
 	max     int
 	nextSeq func() int64
-	onLine  func(LineRec)
+	onLine  func(LineRec) int64
 
 	mu        sync.Mutex
 	recs      []LineRec
@@ -31,26 +31,43 @@ type LineBuffer struct {
 }
 
 // NewLineBuffer builds a line buffer holding at most max complete lines.
-func NewLineBuffer(max int, nextSeq func() int64, onLine func(LineRec)) *LineBuffer {
+//
+// nextSeq numbers a line for callers that want the buffer to allocate it. Pass
+// nil when someone ELSE owns the numbering: a job with two streams has two
+// buffers fed by two goroutines, so a counter inside a buffer is a race, not an
+// order. In that mode onLine returns the authoritative number and the ring stores
+// it, which keeps the ring, the live stream and the persisted rows on one
+// sequence.
+func NewLineBuffer(max int, nextSeq func() int64, onLine func(LineRec) int64) *LineBuffer {
 	if max <= 0 {
 		max = 10000
 	}
 	return &LineBuffer{max: max, nextSeq: nextSeq, onLine: onLine}
 }
 
+// number assigns the line's sequence and returns the record carrying it. The
+// order matters: when a caller owns the numbering (onLine returns it), that number
+// must be written back into the record, because the ring is what a history query
+// slices on and what the replay sorts on.
+func (lb *LineBuffer) number(rec LineRec) LineRec {
+	if lb.nextSeq != nil {
+		rec.Seq = lb.nextSeq()
+	}
+	if lb.onLine != nil {
+		rec.Seq = lb.onLine(rec)
+	}
+	return rec
+}
+
 // Write splits p into lines (normalizing CRLF) as they are written.
 func (lb *LineBuffer) Write(p []byte) (int, error) {
-	var completed []LineRec
+	// Phase 1 (under mu): split the bytes into complete lines. Nothing outside
+	// this struct runs here.
+	var lines []string
 	lb.mu.Lock()
 	complete := func() {
-		rec := LineRec{Seq: lb.nextSeq(), Line: lb.cur.String()}
+		lines = append(lines, lb.cur.String())
 		lb.cur.Reset()
-		lb.recs = append(lb.recs, rec)
-		if len(lb.recs) > lb.max {
-			lb.recs = lb.recs[1:]
-			lb.dropped++
-		}
-		completed = append(completed, rec)
 	}
 	i := 0
 	if lb.pendingCR && len(p) > 0 && p[0] == '\n' {
@@ -73,12 +90,26 @@ func (lb *LineBuffer) Write(p []byte) (int, error) {
 		}
 	}
 	lb.mu.Unlock()
-	if lb.onLine != nil {
-		for _, rec := range completed {
-			lb.onLine(rec)
-		}
+
+	// Phase 2 (outside mu): number each line and record it. Deliberately NOT
+	// inside the lock: onLine may take another lock (the job's publish lock), and
+	// calling out while holding mu is how a lock-order inversion starts.
+	for _, line := range lines {
+		lb.record(LineRec{Line: line})
 	}
 	return len(p), nil
+}
+
+// record numbers one completed line and appends it to the ring.
+func (lb *LineBuffer) record(rec LineRec) {
+	rec = lb.number(rec)
+	lb.mu.Lock()
+	lb.recs = append(lb.recs, rec)
+	if len(lb.recs) > lb.max {
+		lb.recs = lb.recs[1:]
+		lb.dropped++
+	}
+	lb.mu.Unlock()
 }
 
 // Recs returns a copy of the ring window (complete lines only).
@@ -105,18 +136,11 @@ func (lb *LineBuffer) FlushLine() string {
 		lb.mu.Unlock()
 		return ""
 	}
-	rec := LineRec{Seq: lb.nextSeq(), Line: lb.cur.String()}
+	line := lb.cur.String()
 	lb.cur.Reset()
-	lb.recs = append(lb.recs, rec)
-	if len(lb.recs) > lb.max {
-		lb.recs = lb.recs[1:]
-		lb.dropped++
-	}
 	lb.mu.Unlock()
-	if lb.onLine != nil {
-		lb.onLine(rec)
-	}
-	return rec.Line
+	lb.record(LineRec{Line: line})
+	return line
 }
 
 // Tail returns the last n lines joined with \n (plus any partial line).
