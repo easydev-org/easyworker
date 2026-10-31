@@ -49,8 +49,8 @@ func TestInfo(t *testing.T) {
 	}
 	// The engine name, with no language: there is no default language to name.
 	// What a client should read instead is Interpreters, asserted below.
-	if info.Shell != "easyscript" {
-		t.Errorf("shell = %q, want %q", info.Shell, "easyscript")
+	if info.Shell != "builtin" {
+		t.Errorf("shell = %q, want %q", info.Shell, "builtin")
 	}
 	for _, l := range info.Interpreters {
 		if l.Id == "" || l.Name == "" {

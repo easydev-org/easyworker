@@ -29,7 +29,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/easydev-org/easyscript/pkg/engine"
+	"github.com/easydev-org/easyworker/internal/script/engine"
 )
 
 // ErrNoLanguage means the caller did not say what language the command is written

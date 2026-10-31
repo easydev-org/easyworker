@@ -55,12 +55,16 @@ func (s *WorkerService) Info(ctx context.Context, req *workerv1.InfoRequest) (*w
 	return &workerv1.InfoResponse{
 		Os:   goos(),
 		Arch: goarch(),
-		// The engine is easyscript: a program TEXT goes to an external interpreter,
-		// never to a host shell and never to an in-process one. No language is
-		// named here because there is no default one — a caller states it per job
-		// (see ExecuteRequest.lang). Which interpreters exist is
-		// Info.interpreters, which is the list a client should actually read.
-		Shell: "easyscript",
+		// A program TEXT goes to an external interpreter, never to a host shell and never to an
+		// in-process one.
+		//
+		// NO LANGUAGE IS NAMED HERE because there is no default one — a caller states it per job (see
+		// ExecuteRequest.lang). Which interpreters exist is Info.interpreters, which is the list a
+		// client should actually read.
+		//
+		// "builtin" rather than "easyscript": the engine is part of this binary now, and naming a
+		// separate product here told a reader there was one to go and find.
+		Shell: "builtin",
 		// Slash-form so a Windows worker reports C:/... consistently to the UI.
 		Workspace:    filepath.ToSlash(s.files.Root()),
 		BootId:       s.bootID,

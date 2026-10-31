@@ -65,7 +65,9 @@ func main() {
 		fmt.Printf("FATAL Info: %v\n", err)
 		os.Exit(1)
 	}
-	check("info", info.Shell == "easyscript(bash)",
+	// The engine is part of this binary now, so it reports itself as such rather than naming a
+	// separate product a reader would go looking for.
+	check("info", info.Shell == "builtin",
 		fmt.Sprintf("os=%s arch=%s shell=%s boot=%s", info.Os, info.Arch, info.Shell, short(info.BootId)))
 
 	// ---- Execute + watch ----
