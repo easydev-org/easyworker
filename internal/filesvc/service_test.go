@@ -3,6 +3,7 @@ package filesvc
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -69,6 +70,12 @@ func TestWritePreservesMode(t *testing.T) {
 	st, err := os.Stat(filepath.Join(s.Root(), "run.sh"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	// WINDOWS HAS NO UNIX MODE BITS. os.Chmod there maps onto the read-only attribute, so a rewrite
+	// reports -rw-rw-rw- and the assertion below can never hold. What this test exists to catch — a write
+	// that TRUNCATES the file and so drops the executable bit — is a Unix property.
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no Unix mode bits; the executable bit is a Unix property")
 	}
 	if st.Mode().Perm() != 0o755 {
 		t.Fatalf("mode = %v, want 0755", st.Mode().Perm())
@@ -189,10 +196,14 @@ func TestListOutsideRootReturnsAbsolute(t *testing.T) {
 	}
 	// The child path must stay ABSOLUTE (not stripped to a workspace-relative
 	// name that a client would re-root under the workspace).
-	if !strings.HasPrefix(entries[0].Path, "/") {
-		t.Fatalf("expected absolute path, got %q", entries[0].Path)
+	//
+	// ASK THE OS, DO NOT LOOK FOR A LEADING SLASH. A Windows absolute path is `C:/Users/...`, which has
+	// no leading slash at all — the check below only ever agreed with Unix, so this test failed the first
+	// time it ran on Windows while the code was right.
+	if !filepath.IsAbs(filepath.FromSlash(entries[0].Path)) {
+		t.Fatalf("expected an absolute path, got %q", entries[0].Path)
 	}
-	if !strings.HasSuffix(entries[0].Path, "/f.txt") {
+	if !strings.HasSuffix(filepath.ToSlash(entries[0].Path), "/f.txt") {
 		t.Fatalf("unexpected path %q", entries[0].Path)
 	}
 }

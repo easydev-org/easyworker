@@ -12,10 +12,28 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
+
+// needPOSIXShell skips a test whose install step is a shell script.
+//
+// THE TEST DATA USES /bin/sh, which is not a Windows path. That is a property of the FIXTURE, not of the
+// installer: the installer runs whatever argv the index gives it, and a Windows-hosted toolchain index
+// would name a Windows program. Skipping keeps these tests honest about what they cover instead of
+// failing for a reason that has nothing to do with the code under test.
+func needPOSIXShell(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the install fixture is a /bin/sh script; a Windows index names a Windows program")
+	}
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skipf("no sh on PATH: %v", err)
+	}
+}
 
 // tarGz builds a single-root tar.gz: root/<files...>.
 func tarGz(t *testing.T, root string, files map[string]string) []byte {
@@ -193,6 +211,7 @@ func TestEnsureRequires(t *testing.T) {
 }
 
 func TestEnsureInstallStep(t *testing.T) {
+	needPOSIXShell(t)
 	blob := tarGz(t, "rust", map[string]string{"install.sh": "#!/bin/sh\ntouch \"$1/marker\"\n"})
 	idxURL, _ := serveIndex(t, map[string][]byte{"rust.tgz": blob}, func(base string) string {
 		doc := map[string]any{"schema": 1, "toolchains": map[string]any{
@@ -272,6 +291,7 @@ func TestGreatestVersion(t *testing.T) {
 // TestEnsureEnv: a version's `env` is exported (with {root} expanded) after a
 // successful install — ruby's LD_LIBRARY_PATH.
 func TestEnsureEnv(t *testing.T) {
+	needPOSIXShell(t)
 	blob := tarGz(t, "ruby", map[string]string{"bin/ruby": "#!/bin/sh\n"})
 	idxURL, _ := serveIndex(t, map[string][]byte{"ruby.tgz": blob}, func(base string) string {
 		doc := map[string]any{"schema": 1, "toolchains": map[string]any{
@@ -307,6 +327,7 @@ func TestEnsureEnv(t *testing.T) {
 // TestEnsureInstallStepArgv: `install` argv runs with {root} expanded and cwd
 // at the version dir.
 func TestEnsureInstallStepArgv(t *testing.T) {
+	needPOSIXShell(t)
 	blob := tarGz(t, "clj", map[string]string{"install.sh": "#!/bin/sh\nmkdir -p \"$1/bin\"; touch \"$1/bin/clojure\"\n"})
 	idxURL, _ := serveIndex(t, map[string][]byte{"clj.tgz": blob}, func(base string) string {
 		doc := map[string]any{"schema": 1, "toolchains": map[string]any{
@@ -335,6 +356,7 @@ func TestEnsureInstallStepArgv(t *testing.T) {
 // install[] there with cwd=subdir, expands {root} to the VERSION ROOT, and
 // resolves `bin` against the version root (rust's install.sh shape).
 func TestEnsureUnpackDir(t *testing.T) {
+	needPOSIXShell(t)
 	// install.sh asserts it is NOT run from its own directory, then writes to
 	// the prefix it is given.
 	blob := tarGz(t, "rust", map[string]string{
@@ -372,6 +394,7 @@ func TestEnsureUnpackDir(t *testing.T) {
 
 // TestEnsureExecutableBit: a bin file shipped non-executable is made runnable.
 func TestEnsureExecutableBit(t *testing.T) {
+	needPOSIXShell(t)
 	blob := tarGz(t, "perl", map[string]string{"bin/cpanm": "#!/bin/sh\necho hi\n"})
 	idxURL, _ := serveIndex(t, map[string][]byte{"perl.tgz": blob}, func(base string) string {
 		doc := map[string]any{"schema": 1, "toolchains": map[string]any{
