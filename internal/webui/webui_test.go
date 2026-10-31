@@ -22,6 +22,16 @@ func TestHandlerServesPanel(t *testing.T) {
 	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
 		t.Fatalf("content-type = %q", ct)
 	}
+	// A STUB IS SKIPPED, LIKE IN TestHandlerServesBuiltAssets JUST BELOW — the two must agree, and they
+	// did not: this one failed on a placeholder while the other skipped. The platform jobs create a stub
+	// on purpose (they test the engine on Windows and macOS and have no Node toolchain), so failing there
+	// reports "the panel is broken" about a file the job put there itself.
+	//
+	// The title assertion is real wherever dist/ came from a build — which is the `build` job, and any
+	// developer who has run `npm run build`.
+	if !strings.Contains(rec.Body.String(), "/assets/") {
+		t.Skip("the embedded panel is a stub — the title belongs to a real build")
+	}
 	if !strings.Contains(rec.Body.String(), "Agent Worker") {
 		t.Error("index should carry the Agent Worker title")
 	}
@@ -47,8 +57,18 @@ func TestHandlerServesBuiltAssets(t *testing.T) {
 
 func TestHandlerFallsBackToIndex(t *testing.T) {
 	rec := get(t, "/some/deep/link")
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Agent Worker") {
-		t.Fatalf("fallback: %d", rec.Code)
+	// THE SUBJECT IS THE FALLBACK, NOT THE PANEL'S CONTENT. Asserting on the title made this test fail on
+	// a stub panel — saying nothing about whether an unknown path falls back — and would have failed
+	// again the moment the panel's wording changed. What matters is that an unknown path is answered with
+	// the SPA entry and a 200 rather than a 404.
+	if rec.Code != http.StatusOK {
+		t.Fatalf("fallback status = %d, want 200", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Fatalf("fallback content-type = %q, want text/html", ct)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "<html") {
+		t.Fatalf("fallback body is not the SPA entry: %q", body)
 	}
 }
 
