@@ -322,6 +322,20 @@ func (s *Service) List(path string, depth, limit int) (isDir bool, entries []Ent
 // rel renders an absolute path workspace-relative with '/' separators.
 func (s *Service) rel(p string) string {
 	r := strings.TrimPrefix(strings.TrimPrefix(s.root, `\\?\`), `\\.\`)
+	// THE ROOT IS RESOLVED THE SAME WAY resolve() RESOLVES A PATH, or the comparison below is between
+	// two spellings of the same directory.
+	//
+	// macOS puts /var behind a symlink to /private/var, and `t.TempDir()` — like many a real workspace —
+	// lands under it. resolve() calls EvalSymlinks on the path it is given, so a listing returned
+	// /private/var/... while the root was still /var/..., the prefix did not match, and every entry came
+	// back ABSOLUTE. A client that treats a relative path as workspace-relative then re-rooted an
+	// absolute one and got nowhere. Linux has the same shape wherever /tmp or a home directory is a
+	// symlink.
+	// AFTER the device prefix is stripped, not before: EvalSymlinks does not understand `\\?\`, and a
+	// Windows root would come back unresolved — the same mismatch this is here to prevent.
+	if abs, err := filepath.EvalSymlinks(r); err == nil {
+		r = strings.TrimPrefix(strings.TrimPrefix(abs, `\\?\`), `\\.\`)
+	}
 	p = strings.TrimPrefix(strings.TrimPrefix(p, `\\?\`), `\\.\`)
 	if p == r {
 		return "."
