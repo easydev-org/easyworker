@@ -82,3 +82,87 @@ jobs:
             exit 1
           fi
           echo "static: OK"
+
+  # WINDOWS AND MACOS ARE NOT CROSS-COMPILE CHECKS HERE — they RUN.
+  #
+  # The engine spawns interpreters as child processes in their own process group, and the details that
+  # make that work differ on every platform: how a process tree is killed (taskkill /T against a process
+  # group), how a program is handed to PowerShell (-Command swallows arguments; -File does not), and
+  # which interpreters exist at all. A compile check sees none of it.
+  test-platform:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The panel is built in the `build` job and embedded at compile time. dist/ is gitignored, so
+      # //go:embed needs a directory here; a stub satisfies it, and TestBinaryServesPanel SKIPS on a stub
+      # rather than failing for a reason that is about this file.
+      - name: embed placeholder
+        shell: bash
+        run: |
+          mkdir -p internal/webui/dist
+          echo '<!doctype html><html><body><div id="app"></div></body></html>' > internal/webui/dist/index.html
+
+      # PowerShell 7 is the CROSS-PLATFORM entry a Windows caller will pick, and it is what
+      # TestPlatformLanguageRuns asserts. Installed BEFORE the tests so the inventory below reflects
+      # what they will see.
+      - name: install PowerShell 7
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Get-Command pwsh -ErrorAction SilentlyContinue)) {
+            winget install --id Microsoft.PowerShell --silent `
+              --accept-source-agreements --accept-package-agreements
+            if ($LASTEXITCODE -ne 0) { throw "winget install failed: $LASTEXITCODE" }
+            $machine = [Environment]::GetEnvironmentVariable('Path','Machine')
+            $user    = [Environment]::GetEnvironmentVariable('Path','User')
+            $env:Path = "$machine;$user"
+            foreach ($d in ("$machine;$user" -split ';' | Where-Object { $_ })) {
+              if (Test-Path $d) { Add-Content -Path $env:GITHUB_PATH -Value $d }
+            }
+          }
+          pwsh -NoProfile -NonInteractive -Command '$PSVersionTable.PSVersion.ToString()'
+
+      # Reported, not asserted: the assertions live in the tests, and one place to look when one fails is
+      # the point of printing this.
+      - name: what this host provides
+        shell: bash
+        run: |
+          set -uo pipefail
+          for c in python3 python node bash sh zsh swift pwsh powershell nu; do
+            if command -v "$c" >/dev/null 2>&1; then printf '%-12s %s\n' "$c" "$(command -v "$c")"
+            else printf '%-12s -\n' "$c"; fi
+          done
+
+      - name: go test (unit, including the platform-filtering assertions)
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+        run: go test ./internal/... -count=1
+
+      # The platform's OWN language, running a real program through the engine. This is the assertion
+      # that catches a wrong ProgFlag/Argv0/ArgsNeedSep for powershell — a mistake no Linux unit test
+      # can see.
+      - name: run this platform's own languages through the engine
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+        run: go test ./internal/script/job -run 'TestPlatformLanguageRuns' -count=1 -v
+
+      # THE BINARY, END TO END, ON THIS PLATFORM. Everything above is in-process; this builds the real
+      # executable, starts it, claims it with the code it prints, and drives it over RPC. On Windows it
+      # is also where the process-group kill is exercised for real.
+      - name: the shipped binary, end to end
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+        run: go test ./e2e -count=1 -v

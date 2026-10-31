@@ -114,6 +114,40 @@ func (s *WorkerService) Execute(ctx context.Context, req *workerv1.ExecuteReques
 			"lang required: name the interpreter the command is written in "+
 				"(see Info.interpreters for this host's ids)")
 	}
+	// A MODE THE LANGUAGE DOES NOT DECLARE IS A CALLER MISTAKE, so it is refused as one — InvalidArgument,
+	// not Internal. The engine refuses it too, but by the time the error travels back from there it is
+	// indistinguishable from a crash, and a client that got CodeInternal for a typo would retry.
+	if m := strings.TrimSpace(req.GetMode()); m != "" {
+		declared := s.interpreters(ctx)
+		var modes []string
+		found := false
+		for _, l := range declared {
+			if l.GetId() == req.GetLang() {
+				found = true
+				modes = l.GetModes()
+				break
+			}
+		}
+		if !found {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Sprintf(
+				"unknown language %q (see Info.interpreters)", req.GetLang()))
+		}
+		ok := false
+		for _, d := range modes {
+			if d == m {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			if len(modes) == 0 {
+				return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Sprintf(
+					"%s declares no modes, so mode %q cannot apply; omit it", req.GetLang(), m))
+			}
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Sprintf(
+				"%s has no mode %q; it declares: %s", req.GetLang(), m, strings.Join(modes, ", ")))
+		}
+	}
 	// On-demand toolchains: install whatever the workspace declared BEFORE the
 	// job runs. A failure fails the job loudly — never a silent fallback to the
 	// bare base image (see abc-protocol/deploy/DEVELOP.md "Toolchain index").

@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/easydev-org/easyworker/internal/script/job"
@@ -159,6 +160,39 @@ func (e *Engine) Start(ctx context.Context, spec Spec) (*Job, error) {
 	dir := spec.Dir
 	if dir == "" {
 		dir = e.dir
+	}
+	// A MODE THE LANGUAGE DOES NOT DECLARE IS REFUSED.
+	//
+	// The proto promises this ("Sending a mode a language does not declare is an error, never a silent
+	// fallback") and it was not true: the mode was recorded and passed through, so `bash` with
+	// `mode: esm` ran as plain bash and reported success. A caller who mistyped a mode got a green
+	// result from a run that ignored what they asked for — the exact failure the sentence exists to
+	// prevent.
+	//
+	// Checked HERE because this is where a Spec becomes a job; a second check further in would be one
+	// place to forget.
+	if spec.Mode != "" {
+		if _, ok := lang.Get(spec.Lang); !ok {
+			// The engine does not import the caller-facing error type; naming the language is enough for
+			// the caller to act on.
+			return nil, fmt.Errorf("unknown language %q", spec.Lang)
+		}
+		declared := e.Modes(spec.Lang)
+		found := false
+		for _, m := range declared {
+			if m == spec.Mode {
+				found = true
+				break
+			}
+		}
+		if !found {
+			if len(declared) == 0 {
+				return nil, fmt.Errorf(
+					"%s declares no modes, so mode %q cannot apply; omit it", spec.Lang, spec.Mode)
+			}
+			return nil, fmt.Errorf(
+				"%s has no mode %q; it declares: %s", spec.Lang, spec.Mode, strings.Join(declared, ", "))
+		}
 	}
 	j, err := e.runner.Start(context.Background(), job.Spec{
 		Lang:       spec.Lang,
