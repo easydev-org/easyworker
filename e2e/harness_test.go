@@ -3,7 +3,7 @@
 //
 // WHY A BINARY AND NOT A HANDLER: the other tests in this repository call the service directly. They
 // prove the logic and say nothing about whether the thing that SHIPS works — flag parsing, the
-// embedded panel, the enrollment handshake, and the fact that a request survives a real socket and a
+// RPC surface, the enrollment handshake, and the fact that a request survives a real socket and a
 // real bearer. That is what this package is for.
 package e2e
 

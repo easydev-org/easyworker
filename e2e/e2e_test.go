@@ -8,38 +8,63 @@ import (
 	"time"
 )
 
-// The binary starts, answers its health probe, and serves the embedded panel.
+// The binary starts and answers its health probe — and `/` IS NOT A PAGE ANY MORE.
 //
-// THE PANEL CHECK IS NOT COSMETIC: `//go:embed all:dist` accepts an empty directory, so a build with no
-// UI ships happily and serves nothing — which is how v0.2.0-v0.3.0 shipped a "<html></html>" stub as the
+// THIS TEST USED TO ASSERT THE OPPOSITE, and it was right to: the binary embedded a Svelte control
+// panel at `/`, and `//go:embed all:dist` accepts an EMPTY directory, so a build with no UI shipped
+// happily and served nothing — which is how v0.2.0-v0.3.0 shipped a "<html></html>" stub as the
 // control panel.
-func TestBinaryServesPanel(t *testing.T) {
+//
+// The panel is gone. The browser belongs to easyvm now, which serves one page with a screen, serial
+// console, ssh shell, files and jobs; a second UI behind it was a second thing to keep in step. What
+// this test holds is the consequence: NOTHING is served at `/`, so a person who finds this port
+// knows they are at an RPC endpoint rather than at a half-built panel.
+func TestBinaryServesRPCAndNoPage(t *testing.T) {
 	w := startWorker(t)
 
-	resp, err := http.Get(w.base + "/")
+	// THE HEALTH PROBE STILL ANSWERS, because it is what a launcher and a Service wait on.
+	resp, err := http.Get(w.base + "/healthz")
+	if err != nil {
+		t.Fatalf("GET /healthz: %v", err)
+	}
+	body := readAll(t, resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /healthz = %d", resp.StatusCode)
+	}
+	if strings.TrimSpace(body) != "ok" {
+		t.Fatalf("GET /healthz = %q, want ok", body)
+	}
+
+	// AND `/` DOES NOT. A 404 is the honest answer: this process has no UI, and inventing one here
+	// is what the removal was for. A 200 with an empty body would be worse than a 404 - it is the
+	// stub this test was originally written to catch.
+	resp2, err := http.Get(w.base + "/")
 	if err != nil {
 		t.Fatalf("GET /: %v", err)
 	}
+	page := readAll(t, resp2)
+	if resp2.StatusCode == http.StatusOK {
+		t.Fatalf("GET / answered 200 with %q — this binary no longer serves a panel, so a 200 at the "+
+			"root is a stub or a leftover handler", page)
+	}
+	if strings.Contains(page, "<html") {
+		t.Fatalf("GET / served HTML: %q", page)
+	}
+}
+
+func readAll(t *testing.T, resp *http.Response) string {
+	t.Helper()
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET / = %d", resp.StatusCode)
-	}
-	var body [1024]byte
-	n, _ := resp.Body.Read(body[:])
-	page := string(body[:n])
-	if !strings.Contains(page, "<html") {
-		t.Fatalf("the panel is not HTML: %q", page)
-	}
-	// A STUB IS SKIPPED, NOT FAILED — and the difference matters. The platform jobs create the stub
-	// deliberately, because they test the ENGINE on Windows and macOS and have no Node toolchain to
-	// build a real panel with. Failing there would say "the panel is broken" about a file this test
-	// suite put there itself.
-	//
-	// The real assertion lives where a real panel exists: the `build` job, which builds the SPA before
-	// running the tests. A stub reaching a RELEASE is caught by the binary's own startup check, which
-	// logs "panel: ok" with a size, and by this test wherever dist/ came from a build.
-	if !strings.Contains(page, "assets/") {
-		t.Skip("the embedded panel is a stub — set up by the platform jobs; a real build is asserted in the build job")
+	var b strings.Builder
+	buf := make([]byte, 4096)
+	for {
+		n, err := resp.Body.Read(buf)
+		if n > 0 {
+			b.Write(buf[:n])
+		}
+		if err != nil {
+			return b.String()
+		}
 	}
 }
 
@@ -57,6 +82,7 @@ func TestBinaryReportsItsHost(t *testing.T) {
 	if in.Workspace == "" {
 		t.Error("workspace is empty")
 	}
+	// EVERY INTERPRETER OFFERED MUST NAME A REAL PATH. An entry without one would be a language a client
 	// EVERY INTERPRETER OFFERED MUST NAME A REAL PATH. An entry without one would be a language a client
 	// could pick and the engine could not run.
 	for _, l := range in.Interpreters {
