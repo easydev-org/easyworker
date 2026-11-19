@@ -1,23 +1,12 @@
 # syntax=docker/dockerfile:1
 # easyworker: single static Go binary, Connect RPC (worker.v1.WorkerService).
 #
-# Three stages:
-#   1. webui — build the control-panel SPA from the easyworker-webui repo
-#      (dist is NOT committed in this repo anymore).
-#   2. build — compile the Go binary, embedding the SPA from stage 1.
-#   3. runtime — a minimal alpine (ca-certificates + curl only).
+# TWO STAGES, AND THERE USED TO BE THREE. The one that went built a Svelte control panel from a
+# separate repository and embedded it so this service could serve a UI. That UI is gone: the browser
+# belongs to easyvm, and this binary is the Connect RPC and nothing else. Removing the stage removed
+# a node toolchain, an `npm ci` and a cross-repository build dependency from every image build.
 # Official images by default; a caller can point REGISTRY at a mirror.
 ARG REGISTRY=docker.io/library
-
-# ---- webui (node) ----
-FROM ${REGISTRY}/node:22-alpine AS webui
-ARG EASYWORKER_WEBUI_REPO=https://github.com/easydev-org/easyworker-webui.git
-ARG EASYWORKER_WEBUI_REF=main
-WORKDIR /webui
-RUN apk add --no-cache git ca-certificates \
-    && git clone --depth 1 --branch "${EASYWORKER_WEBUI_REF}" "${EASYWORKER_WEBUI_REPO}" . \
-    && npm ci --no-audit --no-fund \
-    && OUT_DIR=dist npm run build
 
 # ---- build (go) ----
 FROM ${REGISTRY}/golang:1.26-alpine AS build
@@ -31,10 +20,6 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . ./
-# The SPA is built in the webui stage; place it at the go:embed path AFTER
-# copying the tree (the repo's internal/webui/dist/ is just a placeholder), so
-# //go:embed finds the real build.
-COPY --from=webui /webui/dist/ internal/webui/dist/
 RUN go build -trimpath -ldflags "-s -w" -o /out/easyworker ./cmd/easyworker
 
 # ---- runtime ----
@@ -42,7 +27,9 @@ FROM ${REGISTRY}/alpine:3.24
 RUN apk add --no-cache ca-certificates curl
 COPY --from=build /out/easyworker /usr/local/bin/easyworker
 RUN mkdir -p /root/workspace /data
-ENV WORKER_PORT=8080 \
+# 48080 SITS BESIDE easystream's 48079, and the pair is the contract between the two daemons and
+# easyvm. 8080 is what a container usually gets and it collides with easyvm's own daemon.
+ENV WORKER_PORT=48080 \
     WORKER_DB=/data/jobs.db
-EXPOSE 8080
+EXPOSE 48080
 ENTRYPOINT ["/usr/local/bin/easyworker"]

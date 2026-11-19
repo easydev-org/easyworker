@@ -30,13 +30,10 @@ import (
 	"github.com/easydev-org/easyworker/internal/a11y/native"
 	"github.com/easydev-org/easyworker/internal/auth"
 	"github.com/easydev-org/easyworker/internal/computer"
-	"github.com/easydev-org/easyworker/internal/desktopproxy"
 	"github.com/easydev-org/easyworker/internal/filesvc"
 	"github.com/easydev-org/easyworker/internal/jobsvc"
 	"github.com/easydev-org/easyworker/internal/script"
-	"github.com/easydev-org/easyworker/internal/stream"
 	"github.com/easydev-org/easyworker/internal/toolchains"
-	"github.com/easydev-org/easyworker/internal/webui"
 )
 
 func main() {
@@ -47,14 +44,24 @@ func main() {
 		os.Exit(runToolchainInstall(os.Args[2:]))
 	}
 
-	addr := flag.String("addr", "", "listen address (default 0.0.0.0:${WORKER_PORT:-8080})")
+	addr := flag.String("addr", "", "listen address (default 0.0.0.0:${WORKER_PORT:-48080})")
 	workspace := flag.String("workspace", "", "workspace root (default ${WORKER_WORKSPACE} or ~/workspace)")
 	dbPath := flag.String("db", "", "job history sqlite path (default ${WORKER_DB} or ./easyworker.db)")
 	flag.Parse()
 
 	listen := *addr
 	if listen == "" {
-		port := envOr("WORKER_PORT", "8080")
+		// 48080 AND NOT 8080, BECAUSE THE PORT IS NOW A CONTRACT RATHER THAN A GUESS.
+		//
+		// 8080 is what a container's HTTP usually gets and it collides with everything - easyvm's own
+		// daemon listens there. The two daemons in a microvm now sit on fixed neighbours:
+		//
+		//	easystream  48079  est://   video, input, a11y, screenshot
+		//	easyworker  48080  HTTP     the Connect RPC
+		//
+		// Both are overridable by env, and the default is stated here so a person reading either
+		// daemon can find the other.
+		port := envOr("WORKER_PORT", "48080")
 		listen = "0.0.0.0:" + port
 	}
 	ws := *workspace
@@ -146,29 +153,22 @@ func main() {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	})
-	// The easystream daemon's own UI, proxied under our origin at /desktop/.
-	// The worker and the daemon are always in the SAME pod (the daemon listens
-	// on 127.0.0.1:48078), so this needs no Service, no second host and no
-	// CORS: the panel just opens /desktop/ in a new window.
-	// The daemon authorizes View by default; only a control token upgrades it to
-	// Control (keyboard/mouse injection). Inject the worker's own token so the
-	// proxied desktop is actually drivable, without handing the token to the page.
-	// Use the gate's ACTIVE token, not bootToken: bootToken is only what the
-	// image passed in, and it is empty on an image that relies on persisted
-	// enrollment (kiosk RESUMED with no WORKER_TOKEN in its env). Using the
-	// gate's token means the proxy always matches what the daemon was told.
-	mux.Handle("/desktop/", desktopproxy.Handler("/desktop", os.Getenv("EASYSTREAM_HTTP"), gate.LocalToken()))
-	mux.Handle("/desktop", http.RedirectHandler("/desktop/", http.StatusFound))
-	// WebRTC screen stream (H.264), captured + encoded in-process by the
-	// embedded a11y library. The panel's Desktop view prefers this and falls
-	// Mounted only when the sandbox has a screen to capture.
-	if hasScreen() {
-		mux.Handle(stream.Prefix, stream.New(30, 12_000_000).Handler())
-	}
-	// Built-in static control panel at "/" (same-origin with the RPC above).
-	// Registered LAST: the RPC handlers own their longer, more specific paths
-	// ("/worker.v1.*"), which the ServeMux prefers over this catch-all.
-	mux.Handle("/", webui.Handler())
+	// NO UI, NO PROXY, NO SECOND OPINION ABOUT WHERE THE SCREEN LIVES.
+	//
+	// THIS WORKER USED TO SERVE THREE MORE THINGS: its own Svelte control panel at "/", a
+	// `/desktop/` proxy to easystream's HTTP UI, and a WebRTC `/stream` of its own capture. All
+	// three are gone, and the division of labour is now clean:
+	//
+	//	this worker   Connect RPC over HTTP: jobs, files, the a11y/computer service. Port 48080.
+	//	easystream    `est://` only: video, input, a11y messages, screenshots. Port 48079.
+	//	easyvm        the browser, and it owns every panel a person sees.
+	//
+	// TWO DAEMONS EACH GROWING A FRONT END MEANT three pages to keep in step with one machine, and
+	// the `/desktop/` proxy was the clearest example of the cost: it injected this worker's own
+	// token into requests so the proxied screen would be drivable, which is an authentication
+	// decision made in the wrong process.
+	//
+	// The RPC surface answers on its own mux and nothing else is registered here.
 
 	// Surface the enrollment state. A RESUMED worker keeps its prior token and
 	// is already claimable/usable; an UNCLAIMED worker prints its one-time code
@@ -213,16 +213,6 @@ func main() {
 	} else {
 		log.Printf("git: not available (jobs cannot clone/commit on this platform)")
 	}
-	// The panel is embedded at build time from internal/webui/dist/, which is
-	// git-ignored. A local `go build` in a tree that only has a placeholder
-	// ships that placeholder (v0.2.0-v0.3.0 did exactly this), so say out loud
-	// which one is in here.
-	if webui.PanelLooksStubbed() {
-		log.Printf("panel: STUB embedded (%d B) — / serves a placeholder, build the SPA first", webui.PanelSize())
-	} else {
-		log.Printf("panel: ok (%d B)", webui.PanelSize())
-	}
-
 	// Graceful shutdown on SIGINT/SIGTERM (k8s sends SIGTERM before killing
 	// the pod): stop accepting, let in-flight RPCs finish, kill running jobs
 	// (their finish records commit) and DRAIN the store writer so the last
